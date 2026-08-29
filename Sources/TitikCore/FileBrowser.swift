@@ -257,15 +257,12 @@ public final class FileBrowser: @unchecked Sendable {
     public func browseDirectory(path: String) -> [SearchItem] {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         let expanded = PathResolver.expandPath(trimmed)
-        var isDir: ObjCBool = false
-        let isExistingDirectory = fileManager.fileExists(atPath: expanded, isDirectory: &isDir) && isDir.boolValue
-
         let (basePath, subFilter) = PathResolver.splitPathQuery(trimmed)
 
         let targetDirURL: URL
         let filterPrefix: String
 
-        if PathResolver.isDirectorySession(trimmed) || isExistingDirectory {
+        if PathResolver.isDirectorySession(trimmed) {
             targetDirURL = URL(fileURLWithPath: expanded)
             filterPrefix = ""
         } else {
@@ -280,6 +277,7 @@ public final class FileBrowser: @unchecked Sendable {
             }
         }
 
+        var isDir: ObjCBool = false
         guard fileManager.fileExists(atPath: targetDirURL.path, isDirectory: &isDir), isDir.boolValue else {
             return []
         }

@@ -174,34 +174,7 @@ public struct PreviewPaneView: View {
     }
 
     private func audioPreviewView(url: URL) -> some View {
-        let asset = AVAsset(url: url)
-        return VStack(alignment: .leading, spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
-                VStack(spacing: 8) {
-                    Image(systemName: "waveform")
-                        .font(.system(size: 36))
-                        .foregroundColor(Theme.categoryFile)
-                    Text(url.lastPathComponent)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(Theme.textPrimary)
-                        .lineLimit(1)
-                }
-                .padding(16)
-            }
-            .frame(height: 110)
-
-            let durationSecs = asset.duration.seconds
-            if !durationSecs.isNaN && durationSecs > 0 {
-                metadataRow(label: "Duration", value: formatDuration(durationSecs))
-            }
-            metadataRow(label: "Format", value: url.pathExtension.uppercased())
-            if let size = fileSizeString(for: url) {
-                metadataRow(label: "File Size", value: size)
-            }
-            metadataRow(label: "Path", value: url.path)
-        }
+        AudioPreviewContentView(url: url)
     }
 
     private func codeOrTextPreviewView(url: URL, language: String?) -> some View {
@@ -587,18 +560,64 @@ private struct PDFPreviewContentView: View {
             isLoading = true
             thumbnail = nil
             pageCount = nil
-            let loaded = await Task.detached(priority: .userInitiated) { () -> (NSImage?, Int)? in
+            let loaded = await Task.detached(priority: .userInitiated) { () -> (CGImage?, Int)? in
                 guard let doc = PDFDocument(url: url) else { return nil }
                 let count = doc.pageCount
-                let thumb = doc.page(at: 0)?.thumbnail(of: CGSize(width: 240, height: 180), for: .mediaBox)
-                return (thumb, count)
+                let cgThumb = doc.page(at: 0)?
+                    .thumbnail(of: CGSize(width: 240, height: 180), for: .mediaBox)
+                    .cgImage(forProposedRect: nil, context: nil, hints: nil)
+                return (cgThumb, count)
             }.value
 
-            if let (thumb, count) = loaded {
-                self.thumbnail = thumb
+            if let (cgThumb, count) = loaded {
+                if let cg = cgThumb {
+                    self.thumbnail = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+                }
                 self.pageCount = count
             }
             self.isLoading = false
+        }
+    }
+}
+
+
+private struct AudioPreviewContentView: View {
+    let url: URL
+    @State private var durationSeconds: Double?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+                VStack(spacing: 8) {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 36))
+                        .foregroundColor(Theme.categoryFile)
+                    Text(url.lastPathComponent)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(Theme.textPrimary)
+                        .lineLimit(1)
+                }
+                .padding(16)
+            }
+            .frame(height: 110)
+
+            if let durationSecs = durationSeconds, !durationSecs.isNaN, durationSecs > 0 {
+                metadataRow(label: "Duration", value: formatDuration(durationSecs))
+            }
+            metadataRow(label: "Format", value: url.pathExtension.uppercased())
+            if let size = fileSizeString(for: url) {
+                metadataRow(label: "File Size", value: size)
+            }
+            metadataRow(label: "Path", value: url.path)
+        }
+        .task(id: url) {
+            durationSeconds = nil
+            let asset = AVAsset(url: url)
+            if let cmDuration = try? await asset.load(.duration) {
+                durationSeconds = CMTimeGetSeconds(cmDuration)
+            }
         }
     }
 }
@@ -645,21 +664,25 @@ private struct VideoPreviewContentView: View {
             isLoading = true
             thumbnail = nil
             durationSeconds = nil
-            let loaded = await Task.detached(priority: .userInitiated) { () -> (NSImage?, Double)? in
+            let loaded = await Task.detached(priority: .userInitiated) { () -> (CGImage?, Double)? in
                 let asset = AVAsset(url: url)
                 let generator = AVAssetImageGenerator(asset: asset)
                 generator.appliesPreferredTrackTransform = true
                 let time = CMTime(seconds: 1.0, preferredTimescale: 600)
-                var thumb: NSImage? = nil
-                if let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) {
-                    thumb = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+                let cgImage = try? generator.copyCGImage(at: time, actualTime: nil)
+                let duration: Double
+                if let cmDuration = try? await asset.load(.duration) {
+                    duration = CMTimeGetSeconds(cmDuration)
+                } else {
+                    duration = .nan
                 }
-                let duration = CMTimeGetSeconds(asset.duration)
-                return (thumb, duration)
+                return (cgImage, duration)
             }.value
 
-            if let (thumb, duration) = loaded {
-                self.thumbnail = thumb
+            if let (cgThumb, duration) = loaded {
+                if let cg = cgThumb {
+                    self.thumbnail = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+                }
                 self.durationSeconds = duration
             }
             self.isLoading = false

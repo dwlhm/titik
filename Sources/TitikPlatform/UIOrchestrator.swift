@@ -219,9 +219,15 @@ public final class UIOrchestrator: ObservableObject {
         if item.category == .directory {
             if activeSession == nil {
                 if let url = item.previewURL ?? (item.actionPayload.isEmpty ? nil : URL(fileURLWithPath: item.actionPayload)) {
-                    let cleanTitle = item.title.hasSuffix("/") ? item.title : (item.title + "/")
-                    self.activeSession = DirectoryNavigationSession(rootQueryPrefix: cleanTitle, rootURL: url)
-                    self.query = cleanTitle
+                    let sessionQuery: String
+                    if let payload = item.autocompletePayload, !payload.isEmpty {
+                        sessionQuery = payload.hasSuffix("/") ? payload : (payload + "/")
+                    } else {
+                        let formatted = fileBrowser.formatAutocompletePath(for: item, currentQuery: query)
+                        sessionQuery = formatted.hasSuffix("/") ? formatted : (formatted + "/")
+                    }
+                    self.activeSession = DirectoryNavigationSession(rootQueryPrefix: sessionQuery, rootURL: url)
+                    self.query = sessionQuery
                     DispatchQueue.main.async { [weak self] in self?.moveCaretToEnd() }
                     return
                 }

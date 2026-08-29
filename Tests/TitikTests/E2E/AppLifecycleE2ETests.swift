@@ -63,26 +63,30 @@ struct AppLifecycleE2ETests {
         let orchestrator = UIOrchestrator()
 
         // Setting a path query (directory browsing)
-        orchestrator.query = tempDir.path
+        orchestrator.query = tempDir.path + "/"
 
-        #expect(orchestrator.results.count == 2)
+        #expect(orchestrator.results.count == 3)
         #expect(orchestrator.selectedIndex == 0)
-        #expect(orchestrator.selectedItem?.title == "FolderA")
-        #expect(orchestrator.selectedItem?.hasRichPreview == true)
+        #expect(orchestrator.selectedItem?.title == "..")
 
         // Navigate forward through results
         orchestrator.selectNext()
         #expect(orchestrator.selectedIndex == 1)
+        #expect(orchestrator.selectedItem?.title == "FolderA")
+        #expect(orchestrator.selectedItem?.hasRichPreview == true)
+
+        orchestrator.selectNext()
+        #expect(orchestrator.selectedIndex == 2)
         #expect(orchestrator.selectedItem?.title == "FileB.swift")
         #expect(orchestrator.selectedItem?.hasRichPreview == true)
 
         // Clamping forward navigation
         orchestrator.selectNext()
-        #expect(orchestrator.selectedIndex == 1)
+        #expect(orchestrator.selectedIndex == 2)
 
         // Navigate backward
         orchestrator.selectPrevious()
-        #expect(orchestrator.selectedIndex == 0)
+        #expect(orchestrator.selectedIndex == 1)
         #expect(orchestrator.selectedItem?.title == "FolderA")
 
         // Test executing selected item and verify action invocation

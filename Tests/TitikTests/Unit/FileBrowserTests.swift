@@ -83,7 +83,8 @@ struct FileBrowserTests {
         let fileB = tempDir.appendingPathComponent("BFile.png")
         try "png".write(to: fileB, atomically: true, encoding: .utf8)
 
-        let items = fileBrowser.browseDirectory(path: tempDir.path)
+        let rawItems = fileBrowser.browseDirectory(path: tempDir.path + "/")
+        let items = rawItems.filter { $0.title != ".." }
         #expect(items.count == 3)
 
         // Folders first

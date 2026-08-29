@@ -51,9 +51,9 @@ struct AutocompleteAndDirectoryNavigationTests {
         let formattedShort = fileBrowser.formatAutocompletePath(for: dirItem, currentQuery: "Doc")
         #expect(formattedShort == "Documents/")
 
+        orchestrator.query = "Doc"
         orchestrator.results = [dirItem]
         orchestrator.selectedIndex = 0
-        orchestrator.query = "Doc"
         orchestrator.autocompleteSelected()
         #expect(orchestrator.query == "Documents/")
 
@@ -61,9 +61,9 @@ struct AutocompleteAndDirectoryNavigationTests {
         let formattedTildeDoc = fileBrowser.formatAutocompletePath(for: dirItem, currentQuery: "~/Doc")
         #expect(formattedTildeDoc == "~/Documents/")
 
+        orchestrator.query = "~/Doc"
         orchestrator.results = [dirItem]
         orchestrator.selectedIndex = 0
-        orchestrator.query = "~/Doc"
         orchestrator.autocompleteSelected()
         #expect(orchestrator.query == "~/Documents/")
 
@@ -71,9 +71,9 @@ struct AutocompleteAndDirectoryNavigationTests {
         let formattedTilde = fileBrowser.formatAutocompletePath(for: dirItem, currentQuery: "~")
         #expect(formattedTilde == "~/Documents/")
 
+        orchestrator.query = "~"
         orchestrator.results = [dirItem]
         orchestrator.selectedIndex = 0
-        orchestrator.query = "~"
         orchestrator.autocompleteSelected()
         #expect(orchestrator.query == "~/Documents/")
     }
@@ -103,9 +103,9 @@ struct AutocompleteAndDirectoryNavigationTests {
         let formattedDir = fileBrowser.formatAutocompletePath(for: childFolderItem, currentQuery: "folder-a/")
         #expect(formattedDir == "folder-a/folder-b/")
 
+        orchestrator.query = "folder-a/"
         orchestrator.results = [childFolderItem]
         orchestrator.selectedIndex = 0
-        orchestrator.query = "folder-a/"
         orchestrator.autocompleteSelected()
         #expect(orchestrator.query == "folder-a/folder-b/")
 
@@ -113,9 +113,9 @@ struct AutocompleteAndDirectoryNavigationTests {
         let formattedFile = fileBrowser.formatAutocompletePath(for: childFileItem, currentQuery: "folder-a/")
         #expect(formattedFile == "folder-a/file.txt")
 
+        orchestrator.query = "folder-a/"
         orchestrator.results = [childFileItem]
         orchestrator.selectedIndex = 0
-        orchestrator.query = "folder-a/"
         orchestrator.autocompleteSelected()
         #expect(orchestrator.query == "folder-a/file.txt")
     }
@@ -138,9 +138,9 @@ struct AutocompleteAndDirectoryNavigationTests {
             autocompletePayload: "~/Documents/"
         )
 
+        orchestrator.query = "~/Doc"
         orchestrator.results = [dirItem]
         orchestrator.selectedIndex = 0
-        orchestrator.query = "~/Doc"
 
         orchestrator.autocompleteSelected()
 
@@ -253,9 +253,9 @@ struct AutocompleteAndDirectoryNavigationTests {
             subtitle: "Application",
             category: .application
         )
+        orchestrator.query = "saf"
         orchestrator.results = [appItem]
         orchestrator.selectedIndex = 0
-        orchestrator.query = "saf"
         orchestrator.autocompleteSelected()
         #expect(orchestrator.query == "Safari")
 
@@ -266,9 +266,9 @@ struct AutocompleteAndDirectoryNavigationTests {
             subtitle: "System Command",
             category: .systemCommand
         )
+        orchestrator.query = "loc"
         orchestrator.results = [cmdItem]
         orchestrator.selectedIndex = 0
-        orchestrator.query = "loc"
         orchestrator.autocompleteSelected()
         #expect(orchestrator.query == "Lock Screen")
 
@@ -281,9 +281,9 @@ struct AutocompleteAndDirectoryNavigationTests {
             actionPayload: "!file ",
             autocompletePayload: "!file "
         )
+        orchestrator.query = "!f"
         orchestrator.results = [bangItem]
         orchestrator.selectedIndex = 0
-        orchestrator.query = "!f"
         orchestrator.autocompleteSelected()
         #expect(orchestrator.query == "!file ")
     }
