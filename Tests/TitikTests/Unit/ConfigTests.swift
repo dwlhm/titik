@@ -67,5 +67,22 @@ struct ConfigTests {
         #expect(cfg.window.width == 720)
         #expect(cfg.hotkey.modifier == "cmd")
         #expect(cfg.hotkey.key == ".")
+        #expect(cfg.theme.bgGlassTint == "#14162838" || cfg.theme.bgGlassTint == "#0e101a24")
+        #expect(cfg.theme.borderColor == "#ffffff14" || cfg.theme.borderColor == "#ffffff26")
+        #expect(cfg.theme.cardBg == "#ffffff0c" || cfg.theme.cardBg == "#ffffff0f")
+    }
+
+    @Test("ThemeConfig default initialization and decoding")
+    func testThemeConfigDefaults() throws {
+        let theme = ThemeConfig()
+        #expect(theme.bgGlassTint == "#0e101a24")
+        #expect(theme.borderColor == "#ffffff26")
+        #expect(theme.cardBg == "#ffffff0f")
+
+        let emptyJSON = "{}".data(using: .utf8)!
+        let decodedTheme = try JSONDecoder().decode(ThemeConfig.self, from: emptyJSON)
+        #expect(decodedTheme.bgGlassTint == "#0e101a24")
+        #expect(decodedTheme.borderColor == "#ffffff26")
+        #expect(decodedTheme.cardBg == "#ffffff0f")
     }
 }

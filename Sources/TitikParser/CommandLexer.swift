@@ -5,6 +5,7 @@ public enum CommandToken: Equatable, Sendable {
     case identifier(String)
     case flag(name: String, value: String?)
     case prefix(String)
+    case bang(name: String, hasTrailingSpace: Bool)
     case equal
     case plus
     case minus
@@ -60,6 +61,21 @@ public final class CommandLexer {
         guard !isAtEnd else { return .eof }
 
         let ch = current
+
+        // Bang command: starts with '!'
+        if ch == "!" {
+            _ = advance()
+            var bangName = ""
+            while !isAtEnd && (current.isLetter || current.isNumber || current == "_" || current == "-") {
+                bangName.append(advance())
+            }
+            var hasSpace = false
+            if !isAtEnd && current.isWhitespace {
+                hasSpace = true
+                skipWhitespace()
+            }
+            return .bang(name: bangName.lowercased(), hasTrailingSpace: hasSpace)
+        }
 
         // Number: starts with digit, or '.' followed by digit
         if ch.isNumber || (ch == "." && peekNext.isNumber) {

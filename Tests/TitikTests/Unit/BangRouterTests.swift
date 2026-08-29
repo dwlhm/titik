@@ -22,6 +22,9 @@ struct BangRouterTests {
     @Test("Bang prefix suggestions without space")
     func testBangPrefixSuggestionsWithoutSpace() {
         let engine = SearchEngine.shared
+        let eSuggestions = engine.search(query: "!e")
+        #expect(eSuggestions.contains { $0.id == "bang:emoji" })
+
         let emojiSuggestions = engine.search(query: "!em")
         #expect(emojiSuggestions.contains { $0.id == "bang:emoji" })
 
@@ -38,7 +41,7 @@ struct BangRouterTests {
         #expect(results.allSatisfy { $0.category == .emoji })
         #expect(results.first?.actionPayload == "🔥")
 
-        let allEmojiResults = engine.search(query: "!emoji")
+        let allEmojiResults = engine.search(query: "!emoji ")
         #expect(!allEmojiResults.isEmpty)
         #expect(allEmojiResults.allSatisfy { $0.category == .emoji })
     }

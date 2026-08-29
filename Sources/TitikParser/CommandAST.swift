@@ -26,5 +26,6 @@ public enum CommandAST: Equatable, Sendable {
     case empty
     case expression(MathExpressionAST)
     case command(name: String, args: [String], flags: [String: String])
+    case bangSuggestion(prefix: String)
     case raw(query: String)
 }

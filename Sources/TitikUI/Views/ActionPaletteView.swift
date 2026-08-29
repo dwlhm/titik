@@ -37,7 +37,7 @@ public struct ActionPaletteView: View {
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(Theme.accent)
                     Text("Actions")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .font(Theme.fontBrand)
                         .foregroundColor(Theme.textPrimary)
 
                     Spacer()
@@ -55,7 +55,7 @@ public struct ActionPaletteView: View {
                 if actions.isEmpty {
                     VStack(spacing: 6) {
                         Text("No actions available")
-                            .font(.system(size: 13))
+                            .font(Theme.fontRowSubtitle)
                             .foregroundColor(Theme.textMuted)
                     }
                     .frame(maxWidth: .infinity, minHeight: 100)
@@ -113,7 +113,7 @@ private struct ActionPaletteRow: View {
                     .frame(width: 20)
 
                 Text(action.title)
-                    .font(.system(size: 13, weight: isSelected ? .medium : .regular))
+                    .font(Theme.fontRowTitle)
                     .foregroundColor(isSelected ? Theme.textPrimary : Theme.textSecondary)
 
                 Spacer()
@@ -130,6 +130,10 @@ private struct ActionPaletteRow: View {
                     : (isHovered ? Color.white.opacity(0.04) : Color.clear)
             )
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isSelected ? Theme.accent.opacity(0.4) : Color.clear, lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
         .onHover { hovering in

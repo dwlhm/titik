@@ -35,9 +35,43 @@ public final class SearchEngine: @unchecked Sendable {
     public func search(query: String) -> [SearchItem] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Bang (!) prefix router
-        if trimmed.hasPrefix("!") {
-            if let (desc, subquery) = pluginHost.findActivePlugin(forQuery: trimmed) {
+        // Path search check using PathResolver
+        if PathResolver.isPathQuery(trimmed) {
+            return fileBrowser.browseDirectory(path: trimmed)
+        }
+
+        let ast = parser.parse(query)
+        var items: [SearchItem] = []
+
+        switch ast {
+        case .empty:
+            items = getDefaultItems()
+
+        case .bangSuggestion(let prefix):
+            let suggestions = getBangSuggestions()
+            if prefix.isEmpty {
+                return suggestions
+            }
+            let lower = "!" + prefix.lowercased()
+            let filtered = suggestions.filter { item in
+                let titleWord = item.title.components(separatedBy: " ").first?.lowercased() ?? item.title.lowercased()
+                let payloadWord = item.actionPayload.trimmingCharacters(in: .whitespaces).lowercased()
+                return titleWord.hasPrefix(lower) || payloadWord.hasPrefix(lower) || item.id.lowercased().contains(lower)
+            }
+            return filtered.isEmpty ? searchAllProviders(query: prefix) : filtered
+
+        case .expression(let exprAST):
+            // Math evaluation result
+            if let mathItem = evaluateMath(exprAST, rawQuery: trimmed, scoreBoost: 500) {
+                items.append(mathItem)
+            }
+            // Also search other items in background with lower priority
+            items.append(contentsOf: searchApplications(query: trimmed))
+            items.append(contentsOf: searchSystemCommands(query: trimmed))
+
+        case .command(let name, let args, _):
+            if let desc = pluginHost.findActivePlugin(command: name) {
+                let subquery = args.joined(separator: " ")
                 let pluginItems = pluginHost.queryPlugin(id: desc.id, subquery: subquery)
                 let searchCategory: SearchCategory = (desc.name.lowercased() == "math" || desc.id.contains("math")) ? .calculator : .plugin
                 return pluginItems.map { pItem in
@@ -56,31 +90,7 @@ public final class SearchEngine: @unchecked Sendable {
                     )
                 }
             }
-            return handleBangQuery(trimmed)
-        }
 
-        // Path search check using PathResolver
-        if PathResolver.isPathQuery(trimmed) {
-            return fileBrowser.browseDirectory(path: trimmed)
-        }
-
-        let ast = parser.parse(trimmed)
-        var items: [SearchItem] = []
-
-        switch ast {
-        case .empty:
-            items = getDefaultItems()
-
-        case .expression(let exprAST):
-            // Math evaluation result
-            if let mathItem = evaluateMath(exprAST, rawQuery: trimmed, scoreBoost: 500) {
-                items.append(mathItem)
-            }
-            // Also search other items in background with lower priority
-            items.append(contentsOf: searchApplications(query: trimmed))
-            items.append(contentsOf: searchSystemCommands(query: trimmed))
-
-        case .command(let name, let args, _):
             let argQuery = args.joined(separator: " ")
             switch name.lowercased() {
             case "app", "apps", "application":
@@ -90,19 +100,25 @@ public final class SearchEngine: @unchecked Sendable {
             case "clip", "clipboard", "cb":
                 items = searchClipboard(query: argQuery)
             case "emoji", "emojis", "e":
-                if let bangEmoji = getBangSuggestions().first(where: { $0.id == "bang:emoji" }) {
-                    let bangItem = SearchItem(
-                        id: bangEmoji.id,
-                        title: bangEmoji.title,
-                        subtitle: bangEmoji.subtitle,
-                        category: bangEmoji.category,
-                        score: 200,
-                        actionPayload: bangEmoji.actionPayload,
-                        autocompletePayload: bangEmoji.autocompletePayload
-                    )
-                    items.append(bangItem)
+                if argQuery.isEmpty {
+                    var emojiResults: [SearchItem] = []
+                    if let bangEmoji = getBangSuggestions().first(where: { $0.id == "bang:emoji" }) {
+                        let bangItem = SearchItem(
+                            id: bangEmoji.id,
+                            title: bangEmoji.title,
+                            subtitle: bangEmoji.subtitle,
+                            category: bangEmoji.category,
+                            score: 200,
+                            actionPayload: bangEmoji.actionPayload,
+                            autocompletePayload: bangEmoji.autocompletePayload
+                        )
+                        emojiResults.append(bangItem)
+                    }
+                    emojiResults.append(contentsOf: searchEmojis(query: ""))
+                    return emojiResults
+                } else {
+                    return searchEmojis(query: argQuery)
                 }
-                items.append(contentsOf: searchEmojis(query: argQuery))
             case "file", "f", "open", "folder", "browse", "find", "dir":
                 if argQuery.isEmpty {
                     items = fileBrowser.browseDirectory(path: "~")
@@ -143,81 +159,6 @@ public final class SearchEngine: @unchecked Sendable {
         return items
     }
 
-    public func handleBangQuery(_ rawQuery: String) -> [SearchItem] {
-        let withoutBang = String(rawQuery.dropFirst()).trimmingCharacters(in: .whitespaces)
-        if !rawQuery.contains(" ") {
-            let suggestions = getBangSuggestions()
-            if withoutBang.isEmpty {
-                return suggestions
-            }
-            let lower = rawQuery.lowercased()
-            let filtered = suggestions.filter { item in
-                let titleWord = item.title.components(separatedBy: " ").first?.lowercased() ?? item.title.lowercased()
-                let payloadWord = item.actionPayload.trimmingCharacters(in: .whitespaces).lowercased()
-                return titleWord.hasPrefix(lower) || payloadWord.hasPrefix(lower) || item.id.lowercased().contains(lower)
-            }
-            return filtered.isEmpty ? searchAllProviders(query: withoutBang) : filtered
-        }
-
-        let parts = withoutBang.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
-        let command = parts.first.map(String.init)?.lowercased() ?? ""
-        let subquery = parts.count > 1 ? String(parts[1]).trimmingCharacters(in: .whitespaces) : ""
-
-        switch command {
-        case "emoji", "emojis", "e":
-            if subquery.isEmpty {
-                var emojiResults: [SearchItem] = []
-                if let bangEmoji = getBangSuggestions().first(where: { $0.id == "bang:emoji" }) {
-                    let bangItem = SearchItem(
-                        id: bangEmoji.id,
-                        title: bangEmoji.title,
-                        subtitle: bangEmoji.subtitle,
-                        category: bangEmoji.category,
-                        score: 200,
-                        actionPayload: bangEmoji.actionPayload,
-                        autocompletePayload: bangEmoji.autocompletePayload
-                    )
-                    emojiResults.append(bangItem)
-                }
-                emojiResults.append(contentsOf: searchEmojis(query: ""))
-                return emojiResults
-            } else {
-                return searchEmojis(query: subquery)
-            }
-
-        case "file", "files", "f", "folder", "dir", "browse":
-            if subquery.isEmpty {
-                return fileBrowser.browseDirectory(path: "~")
-            } else if PathResolver.isPathQuery(subquery) {
-                return fileBrowser.browseDirectory(path: subquery)
-            } else {
-                let fileSearchResults = fileBrowser.searchFiles(query: subquery)
-                return fileSearchResults.isEmpty ? fileBrowser.browseDirectory(path: subquery) : fileSearchResults
-            }
-
-        case "app", "apps", "application":
-            return searchApplications(query: subquery)
-
-        case "clip", "clipboard", "cb", "history":
-            return searchClipboard(query: subquery)
-
-        case "cmd", "sys", "system", "command":
-            return searchSystemCommands(query: subquery)
-
-        case "calc", "math", "calculate":
-            let mathExpr = subquery.isEmpty ? "= 0" : (subquery.hasPrefix("=") ? subquery : "= " + subquery)
-            let mathAST = parser.parse(mathExpr)
-            if case .expression(let expr) = mathAST,
-               let mathItem = evaluateMath(expr, rawQuery: subquery, scoreBoost: 600) {
-                return [mathItem]
-            }
-            return []
-
-        default:
-            return searchAllProviders(query: withoutBang)
-        }
-    }
-
     public func getBangSuggestions() -> [SearchItem] {
         var suggestions: [SearchItem] = [
             SearchItem(
@@ -226,7 +167,7 @@ public final class SearchEngine: @unchecked Sendable {
                 subtitle: "Search & paste emojis with interactive grid",
                 category: .emoji,
                 score: 100,
-                actionPayload: "!emoji",
+                actionPayload: "!emoji ",
                 autocompletePayload: "!emoji "
             ),
             SearchItem(

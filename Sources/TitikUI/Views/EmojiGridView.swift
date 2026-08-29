@@ -211,7 +211,8 @@ public struct EmojiGridView: View {
                                     Image(systemName: category.iconName)
                                         .font(.system(size: 11))
                                     Text(category.rawValue)
-                                        .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                                        .font(Theme.fontFooterLabel)
+                                        .fontWeight(isSelected ? .semibold : .regular)
                                 }
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 5)
@@ -250,11 +251,11 @@ public struct EmojiGridView: View {
                         .font(.system(size: 36))
                         .foregroundColor(Theme.textMuted.opacity(0.5))
                     Text("No emojis found")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(Theme.fontPreviewTitle)
                         .foregroundColor(Theme.textSecondary)
                     if !plugin.searchQuery.isEmpty {
                         Text("No match for \"\(plugin.searchQuery)\"")
-                            .font(.system(size: 12))
+                            .font(Theme.fontPreviewBody)
                             .foregroundColor(Theme.textMuted)
                     }
                     Spacer()
@@ -274,10 +275,10 @@ public struct EmojiGridView: View {
                                                     .font(.system(size: 11, weight: .semibold))
                                                     .foregroundColor(Theme.categoryEmoji)
                                                 Text(category.rawValue)
-                                                    .font(.system(size: 11, weight: .semibold))
+                                                    .font(Theme.fontPreviewSubtitle)
                                                     .foregroundColor(Theme.textSecondary)
                                                 Text("(\(categoryEntries.count))")
-                                                    .font(.system(size: 11))
+                                                    .font(Theme.fontFooterLabel)
                                                     .foregroundColor(Theme.textMuted)
                                                 Spacer()
                                             }
@@ -313,10 +314,10 @@ public struct EmojiGridView: View {
                                         .font(.system(size: 11, weight: .semibold))
                                         .foregroundColor(Theme.categoryEmoji)
                                     Text("Search Results")
-                                        .font(.system(size: 11, weight: .semibold))
+                                        .font(Theme.fontPreviewSubtitle)
                                         .foregroundColor(Theme.textSecondary)
                                     Text("(\(plugin.items.count))")
-                                        .font(.system(size: 11))
+                                        .font(Theme.fontFooterLabel)
                                         .foregroundColor(Theme.textMuted)
                                     Spacer()
                                 }
@@ -377,13 +378,13 @@ public struct EmojiGridView: View {
                     // Meta details
                     VStack(alignment: .leading, spacing: 2) {
                         Text(emoji.name)
-                            .font(.system(size: 13, weight: .bold))
+                            .font(Theme.fontPreviewTitle)
                             .foregroundColor(Theme.textPrimary)
                             .lineLimit(1)
 
                         HStack(spacing: 6) {
                             Text(emoji.shortcode)
-                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .font(Theme.fontCode)
                                 .foregroundColor(Theme.categoryEmoji)
 
                             Text("•")
@@ -391,7 +392,7 @@ public struct EmojiGridView: View {
                                 .foregroundColor(Theme.textMuted)
 
                             Text(emoji.category.rawValue)
-                                .font(.system(size: 11))
+                                .font(Theme.fontFooterLabel)
                                 .foregroundColor(Theme.textMuted)
 
                             Text("•")
@@ -399,7 +400,7 @@ public struct EmojiGridView: View {
                                 .foregroundColor(Theme.textMuted)
 
                             Text(emoji.unicodeHex)
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(Theme.fontCode)
                                 .foregroundColor(Theme.textMuted)
                         }
                     }
@@ -452,8 +453,8 @@ private struct EmojiCell: View {
                         )
                 )
                 .scaleEffect(isSelected ? 1.08 : (isHovered ? 1.03 : 1.0))
-                .animation(.spring(response: 0.2, dampingFraction: 0.7), value: isSelected)
-                .animation(.spring(response: 0.2, dampingFraction: 0.7), value: isHovered)
+                .animation(Theme.springSnappy, value: isSelected)
+                .animation(Theme.springSnappy, value: isHovered)
         }
         .buttonStyle(.plain)
         .onHover { hovering in
@@ -461,4 +462,3 @@ private struct EmojiCell: View {
         }
     }
 }
-

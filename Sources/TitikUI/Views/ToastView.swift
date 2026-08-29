@@ -46,7 +46,7 @@ public struct ToastView: View {
                 .foregroundColor(iconColor)
 
             Text(toast.message)
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .font(Theme.fontToast)
                 .foregroundColor(Theme.textPrimary)
                 .shadow(color: Color.black.opacity(0.6), radius: 2, x: 0, y: 1)
                 .lineLimit(2)
@@ -54,16 +54,36 @@ public struct ToastView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(
-            ZStack {
-                VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
-                Theme.bgGlass
+            Group {
+                if Theme.isLiquidGlassFeasible() {
+                    let shape = Capsule()
+                    ZStack {
+                        VisualEffectView(material: .popover, blendingMode: .behindWindow)
+                        Theme.glassSurfaceGradient
+                        Theme.glassSpecularGlare
+                    }
+                    .clipShape(shape)
+                    .overlay(
+                        shape
+                            .stroke(Theme.borderGlassBevel, lineWidth: 0.5)
+                    )
+                    .overlay(
+                        shape
+                            .stroke(Theme.borderGlassGradient, lineWidth: 1)
+                    )
+                    .shadow(color: Color.black.opacity(0.25), radius: 6, x: 0, y: 3)
+                    .shadow(color: Color.black.opacity(0.35), radius: 16, x: 0, y: 8)
+                } else {
+                    let shape = Capsule()
+                    Theme.bgSolidFallback
+                        .clipShape(shape)
+                        .overlay(
+                            shape
+                                .stroke(Theme.borderGlass, lineWidth: 1)
+                        )
+                        .shadow(color: Color.black.opacity(0.35), radius: 12, x: 0, y: 6)
+                }
             }
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(Theme.borderGlass, lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.35), radius: 12, x: 0, y: 6)
         )
         .contentShape(Capsule())
         .onTapGesture {

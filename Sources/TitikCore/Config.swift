@@ -118,15 +118,15 @@ public struct ThemeConfig: Codable, Equatable, Sendable {
     }
 
     public init(
-        bgGlassTint: String = "#14162838",
-        borderColor: String = "#ffffff14",
+        bgGlassTint: String = "#0e101a24",
+        borderColor: String = "#ffffff26",
         textPrimary: String = "#ffffff",
         textSecondary: String = "#cbd5e1",
         textMuted: String = "#94a3b8",
         accentColor: String = "#a5b4fc",
         selectionBg: String = "#a5b4fc2d",
         badgeBg: String = "#93c5fd33",
-        cardBg: String = "#ffffff0c"
+        cardBg: String = "#ffffff0f"
     ) {
         self.bgGlassTint = bgGlassTint
         self.borderColor = borderColor
@@ -141,15 +141,15 @@ public struct ThemeConfig: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.bgGlassTint = try container.decodeIfPresent(String.self, forKey: .bgGlassTint) ?? "#14162838"
-        self.borderColor = try container.decodeIfPresent(String.self, forKey: .borderColor) ?? "#ffffff14"
+        self.bgGlassTint = try container.decodeIfPresent(String.self, forKey: .bgGlassTint) ?? "#0e101a24"
+        self.borderColor = try container.decodeIfPresent(String.self, forKey: .borderColor) ?? "#ffffff26"
         self.textPrimary = try container.decodeIfPresent(String.self, forKey: .textPrimary) ?? "#ffffff"
         self.textSecondary = try container.decodeIfPresent(String.self, forKey: .textSecondary) ?? "#cbd5e1"
         self.textMuted = try container.decodeIfPresent(String.self, forKey: .textMuted) ?? "#94a3b8"
         self.accentColor = try container.decodeIfPresent(String.self, forKey: .accentColor) ?? "#a5b4fc"
         self.selectionBg = try container.decodeIfPresent(String.self, forKey: .selectionBg) ?? "#a5b4fc2d"
         self.badgeBg = try container.decodeIfPresent(String.self, forKey: .badgeBg) ?? "#93c5fd33"
-        self.cardBg = try container.decodeIfPresent(String.self, forKey: .cardBg) ?? "#ffffff0c"
+        self.cardBg = try container.decodeIfPresent(String.self, forKey: .cardBg) ?? "#ffffff0f"
     }
 }
 

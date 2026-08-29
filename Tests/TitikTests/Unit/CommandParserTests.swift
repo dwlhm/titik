@@ -86,4 +86,14 @@ struct CommandParserTests {
         let ast = parser.parse("visual studio code")
         #expect(ast == .raw(query: "visual studio code"))
     }
+
+    @Test("Parse bang commands and suggestions")
+    func testBangCommandsAndSuggestions() {
+        #expect(parser.parse("!") == .bangSuggestion(prefix: ""))
+        #expect(parser.parse("!e") == .bangSuggestion(prefix: "e"))
+        #expect(parser.parse("!emoji") == .bangSuggestion(prefix: "emoji"))
+        #expect(parser.parse("!e ") == .command(name: "e", args: [], flags: [:]))
+        #expect(parser.parse("!emoji ") == .command(name: "emoji", args: [], flags: [:]))
+        #expect(parser.parse("!emoji smile") == .command(name: "emoji", args: ["smile"], flags: [:]))
+    }
 }

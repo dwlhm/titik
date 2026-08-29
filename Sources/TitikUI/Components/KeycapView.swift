@@ -12,22 +12,24 @@ public struct KeycapView: View {
     public var body: some View {
         HStack(spacing: 4) {
             Text(shortcut)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .font(Theme.fontKeycap)
                 .foregroundColor(Theme.textPrimary)
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
                 .background(
                     RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(Color.white.opacity(0.12))
+                        .fill(Color.white.opacity(0.10))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                        .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
                 )
 
-            Text(label)
-                .font(.system(size: 11, weight: .regular))
-                .foregroundColor(Theme.textMuted)
+            if !label.isEmpty {
+                Text(label)
+                    .font(Theme.fontFooterLabel)
+                    .foregroundColor(Theme.textMuted)
+            }
         }
     }
 }

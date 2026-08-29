@@ -44,7 +44,7 @@ let package = Package(
         ),
         .target(
             name: "TitikPlatform",
-            dependencies: ["TitikCore", "TitikKeymap", "TitikUI", "TitikSearch", "TitikPlugins"]
+            dependencies: ["TitikCore", "TitikKeymap", "TitikUI", "TitikSearch", "TitikPlugins", "TitikParser"]
         ),
         .executableTarget(
             name: "Titik",

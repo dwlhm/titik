@@ -39,7 +39,7 @@ public struct PreviewPaneView: View {
                         .font(.system(size: 32))
                         .foregroundColor(Theme.textMuted.opacity(0.5))
                     Text("Select an item to view preview")
-                        .font(.system(size: 13))
+                        .font(Theme.fontPreviewBody)
                         .foregroundColor(Theme.textMuted)
                     Spacer()
                 }
@@ -49,12 +49,16 @@ public struct PreviewPaneView: View {
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.04))
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.black.opacity(0.15))
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.white.opacity(0.04))
+            }
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(Color.white.opacity(0.10), lineWidth: 1)
         )
         .focusable(false)
     }
@@ -81,12 +85,12 @@ public struct PreviewPaneView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(Theme.fontPreviewTitle)
                     .foregroundColor(Theme.textPrimary)
                     .lineLimit(2)
 
                 Text(item.category.badgeName)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(Theme.fontPreviewSubtitle)
                     .foregroundColor(Theme.colorForCategory(item.category))
             }
         }
@@ -210,7 +214,7 @@ public struct PreviewPaneView: View {
                                 .foregroundColor(isDir.boolValue ? Theme.categoryDirectory : Theme.textMuted)
 
                             Text(child.lastPathComponent)
-                                .font(.system(size: 12))
+                                .font(Theme.fontPreviewBody)
                                 .foregroundColor(Theme.textSecondary)
                                 .lineLimit(1)
                         }
@@ -219,7 +223,7 @@ public struct PreviewPaneView: View {
 
                     if childItems.count > 8 {
                         Text("+ \(childItems.count - 8) more...")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(Theme.fontPreviewSubtitle)
                             .foregroundColor(Theme.textMuted)
                             .padding(.top, 2)
                     }
@@ -245,13 +249,13 @@ public struct PreviewPaneView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(fileTypeDescription(for: url))
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(Theme.fontPreviewTitle)
                         .foregroundColor(Theme.textPrimary)
                         .lineLimit(1)
 
                     if let uti = fileUTIString(for: url) {
                         Text(uti)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(Theme.fontCode)
                             .foregroundColor(Theme.textMuted)
                             .lineLimit(1)
                     }
@@ -295,17 +299,17 @@ public struct PreviewPaneView: View {
     private func calculatorDetailView(_ item: SearchItem) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Result")
-                .font(.system(size: 11, weight: .semibold))
+                .font(Theme.fontPreviewSubtitle)
                 .foregroundColor(Theme.textMuted)
 
             Text(item.title)
-                .font(.system(size: 28, weight: .bold, design: .monospaced))
+                .font(Theme.fontMathResult)
                 .foregroundColor(Theme.categoryMath)
                 .textSelection(.enabled)
 
             if !item.subtitle.isEmpty {
                 Text(item.subtitle)
-                    .font(.system(size: 13))
+                    .font(Theme.fontPreviewBody)
                     .foregroundColor(Theme.textSecondary)
             }
         }
@@ -314,11 +318,11 @@ public struct PreviewPaneView: View {
     private func clipboardDetailView(_ item: SearchItem) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Clipboard Content")
-                .font(.system(size: 11, weight: .semibold))
+                .font(Theme.fontPreviewSubtitle)
                 .foregroundColor(Theme.textMuted)
 
             Text(item.previewDetail ?? item.actionPayload)
-                .font(.system(size: 13, design: .monospaced))
+                .font(Theme.fontCode)
                 .foregroundColor(Theme.textSecondary)
                 .textSelection(.enabled)
                 .padding(10)
@@ -338,7 +342,7 @@ public struct PreviewPaneView: View {
     private func systemCommandDetailView(_ item: SearchItem) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(item.subtitle)
-                .font(.system(size: 13))
+                .font(Theme.fontPreviewBody)
                 .foregroundColor(Theme.textSecondary)
         }
     }
@@ -346,7 +350,7 @@ public struct PreviewPaneView: View {
     private func genericDetailView(detail: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(detail)
-                .font(.system(size: 13))
+                .font(Theme.fontPreviewBody)
                 .foregroundColor(Theme.textSecondary)
         }
     }
@@ -354,10 +358,10 @@ public struct PreviewPaneView: View {
     fileprivate func metadataRow(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.system(size: 11, weight: .semibold))
+                .font(Theme.fontPreviewSubtitle)
                 .foregroundColor(Theme.textMuted)
             Text(value)
-                .font(.system(size: 12, design: .monospaced))
+                .font(Theme.fontCode)
                 .foregroundColor(Theme.textSecondary)
                 .textSelection(.enabled)
         }
@@ -580,7 +584,6 @@ private struct PDFPreviewContentView: View {
     }
 }
 
-
 private struct AudioPreviewContentView: View {
     let url: URL
     @State private var durationSeconds: Double?
@@ -595,7 +598,7 @@ private struct AudioPreviewContentView: View {
                         .font(.system(size: 36))
                         .foregroundColor(Theme.categoryFile)
                     Text(url.lastPathComponent)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(Theme.fontPreviewSubtitle)
                         .foregroundColor(Theme.textPrimary)
                         .lineLimit(1)
                 }
@@ -714,7 +717,7 @@ private struct CodeOrTextPreviewContentView: View {
                 HStack(spacing: 8) {
                     if let lang = language ?? (url.pathExtension.isEmpty ? nil : url.pathExtension) {
                         Text(lang.uppercased())
-                            .font(.system(size: 10, weight: .bold))
+                            .font(Theme.fontBadge)
                             .foregroundColor(Theme.accent)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
@@ -724,14 +727,14 @@ private struct CodeOrTextPreviewContentView: View {
                     }
 
                     Text("\(totalLines) lines")
-                        .font(.system(size: 11))
+                        .font(Theme.fontPreviewSubtitle)
                         .foregroundColor(Theme.textMuted)
 
                     Text("•")
                         .foregroundColor(Theme.textMuted.opacity(0.5))
 
                     Text("\(charCount) chars")
-                        .font(.system(size: 11))
+                        .font(Theme.fontPreviewSubtitle)
                         .foregroundColor(Theme.textMuted)
 
                     Spacer()
@@ -744,7 +747,7 @@ private struct CodeOrTextPreviewContentView: View {
                         VStack(alignment: .trailing, spacing: 2) {
                             ForEach(1...max(1, lines.count), id: \.self) { lineNum in
                                 Text("\(lineNum)")
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .font(Theme.fontCode)
                                     .foregroundColor(Theme.textMuted.opacity(0.4))
                             }
                         }
@@ -753,7 +756,7 @@ private struct CodeOrTextPreviewContentView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             ForEach(0..<lines.count, id: \.self) { i in
                                 Text(lines[i].isEmpty ? " " : lines[i])
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .font(Theme.fontCode)
                                     .foregroundColor(Theme.textSecondary)
                             }
                         }
@@ -802,10 +805,10 @@ private struct CodeOrTextPreviewContentView: View {
 fileprivate func metadataRow(label: String, value: String) -> some View {
     VStack(alignment: .leading, spacing: 2) {
         Text(label)
-            .font(.system(size: 11, weight: .semibold))
+            .font(Theme.fontPreviewSubtitle)
             .foregroundColor(Theme.textMuted)
         Text(value)
-            .font(.system(size: 12, design: .monospaced))
+            .font(Theme.fontCode)
             .foregroundColor(Theme.textSecondary)
             .textSelection(.enabled)
     }
@@ -838,4 +841,3 @@ fileprivate func formatDuration(_ seconds: Double) -> String {
         return String(format: "%d:%02d", mins, secs)
     }
 }
-

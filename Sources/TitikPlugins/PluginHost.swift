@@ -97,6 +97,25 @@ public final class PluginHost: @unchecked Sendable {
         return true
     }
 
+    public func findActivePlugin(command: String) -> PluginDescriptor? {
+        lock.lock()
+        let active = Array(plugins.values)
+        lock.unlock()
+
+        let lower = command.lowercased()
+        for inst in active {
+            let name = inst.descriptor.name.lowercased()
+            var short = inst.descriptor.shortBang.lowercased()
+            if short.hasPrefix("!") {
+                short = String(short.dropFirst())
+            }
+            if lower == name || (!short.isEmpty && lower == short) {
+                return inst.descriptor
+            }
+        }
+        return nil
+    }
+
     public func findActivePlugin(forQuery query: String) -> (descriptor: PluginDescriptor, subquery: String)? {
         lock.lock()
         let active = Array(plugins.values)

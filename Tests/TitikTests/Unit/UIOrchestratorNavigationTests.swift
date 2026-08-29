@@ -312,15 +312,38 @@ struct UIOrchestratorNavigationTests {
             subtitle: "Search & paste emojis with interactive grid",
             category: .emoji,
             score: 100,
-            actionPayload: "!emoji"
+            actionPayload: "!emoji "
         )
         orchestrator.results = [bangEmojiItem]
         orchestrator.selectedIndex = 0
 
         orchestrator.executeSelected()
 
-        #expect(orchestrator.query == "!emoji")
+        #expect(orchestrator.query == "!emoji ")
         #expect(orchestrator.activePluginUI != nil)
+    }
+
+    @Test("Space-delimited plugin activation and uncommitted prefix suggestions in UIOrchestrator")
+    func testSpaceDelimitedPluginActivationInUIOrchestrator() {
+        let orchestrator = UIOrchestrator()
+
+        // Uncommitted queries do not activate plugin UI
+        orchestrator.performSearch("!e")
+        #expect(orchestrator.activePluginUI == nil)
+        #expect(!orchestrator.results.isEmpty)
+
+        orchestrator.performSearch("!emoji")
+        #expect(orchestrator.activePluginUI == nil)
+        #expect(!orchestrator.results.isEmpty)
+
+        // Committed queries with trailing space activate plugin UI
+        orchestrator.performSearch("!e ")
+        #expect(orchestrator.activePluginUI != nil)
+        #expect(orchestrator.results.isEmpty)
+
+        orchestrator.performSearch("!emoji ")
+        #expect(orchestrator.activePluginUI != nil)
+        #expect(orchestrator.results.isEmpty)
     }
 
     @Test("Execute selected bang file item sets query to bang payload")

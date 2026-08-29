@@ -55,13 +55,13 @@ public struct ResultItemRow: View {
             // Title & Subtitle
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(Theme.fontRowTitle)
                     .foregroundColor(Theme.textPrimary)
                     .lineLimit(1)
 
                 if !item.subtitle.isEmpty {
                     Text(item.subtitle)
-                        .font(.system(size: 11, weight: .regular))
+                        .font(Theme.fontRowSubtitle)
                         .foregroundColor(Theme.textMuted)
                         .lineLimit(1)
                 }
@@ -71,7 +71,7 @@ public struct ResultItemRow: View {
 
             // Category Badge
             Text(item.category.badgeName)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .font(Theme.fontBadge)
                 .foregroundColor(Theme.colorForCategory(item.category))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)

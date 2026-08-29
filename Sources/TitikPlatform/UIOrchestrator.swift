@@ -5,6 +5,7 @@ import TitikKeymap
 import TitikUI
 import TitikSearch
 import TitikPlugins
+import TitikParser
 
 @MainActor
 public final class UIOrchestrator: ObservableObject {
@@ -27,6 +28,7 @@ public final class UIOrchestrator: ObservableObject {
 
     private let searchEngine: SearchEngine
     private let fileBrowser: FileBrowser
+    private let commandParser = CommandParser()
     private nonisolated(unsafe) var keyMonitor: Any?
 
     public init(searchEngine: SearchEngine = .shared, fileBrowser: FileBrowser = .shared) {
@@ -67,8 +69,6 @@ public final class UIOrchestrator: ObservableObject {
     }
 
     public func performSearch(_ q: String) {
-        let trimmed = q.trimmingCharacters(in: .whitespacesAndNewlines)
-
         if let session = activeSession {
             if q.hasPrefix(session.rootQueryPrefix) {
                 let sub = String(q.dropFirst(session.rootQueryPrefix.count))
@@ -89,38 +89,30 @@ public final class UIOrchestrator: ObservableObject {
             }
         }
 
-        if trimmed.hasPrefix("!") {
-            let withoutBang = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)
-            let parts = withoutBang.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
-            let command = parts.first.map(String.init)?.lowercased() ?? ""
-            let subquery = parts.count > 1 ? String(parts[1]).trimmingCharacters(in: .whitespaces) : ""
+        let ast = commandParser.parse(q)
 
-            if command == "emoji" || command == "emojis" || command == "e" {
-                let plugin = EmojiPlugin.shared
-                plugin.onSelectEmoji = { [weak self] emoji in
-                    let success = AutoPaster.shared.pasteToActiveApp(content: emoji.emoji)
-                    if success {
-                        self?.reset()
-                    }
+        switch ast {
+        case .command(let name, let args, _) where ["emoji", "emojis", "e"].contains(name.lowercased()):
+            let subquery = args.joined(separator: " ")
+            let plugin = EmojiPlugin.shared
+            plugin.onSelectEmoji = { [weak self] emoji in
+                let success = AutoPaster.shared.pasteToActiveApp(content: emoji.emoji)
+                if success {
+                    self?.reset()
                 }
-                plugin.handleSearchQuery(subquery)
-                self.activePluginUI = plugin
-                self.results = []
-                self.selectedIndex = 0
-                return
-            } else {
-                self.activePluginUI = nil
-                let items = searchEngine.search(query: q)
-                self.results = items
-                self.selectedIndex = 0
-                return
             }
-        }
+            plugin.handleSearchQuery(subquery)
+            self.activePluginUI = plugin
+            self.results = []
+            self.selectedIndex = 0
+            return
 
-        self.activePluginUI = nil
-        let items = searchEngine.search(query: q)
-        self.results = items
-        self.selectedIndex = 0
+        default:
+            self.activePluginUI = nil
+            let items = searchEngine.search(query: q)
+            self.results = items
+            self.selectedIndex = 0
+        }
     }
 
     public var selectedItem: SearchItem? {
@@ -168,8 +160,8 @@ public final class UIOrchestrator: ObservableObject {
             return
         }
 
-        if item.id == "bang:emoji" || item.id == "plugin:emoji" || item.actionPayload == "!emoji" || (item.category == .emoji && item.id.hasPrefix("bang:")) {
-            self.query = "!emoji"
+        if item.id == "bang:emoji" || item.id == "plugin:emoji" || item.actionPayload == "!emoji" || item.actionPayload == "!emoji " || (item.category == .emoji && item.id.hasPrefix("bang:")) {
+            self.query = "!emoji "
             return
         } else if item.id.hasPrefix("bang:") || item.actionPayload.hasPrefix("!") {
             self.query = item.actionPayload.hasSuffix(" ") ? item.actionPayload : (item.actionPayload + " ")
@@ -641,7 +633,7 @@ public struct MainContentView: View {
                                     ))
                             }
                         }
-                        .animation(.spring(response: 0.25, dampingFraction: 0.85), value: orchestrator.selectedItem?.hasRichPreview)
+                        .animation(Theme.springInteractive, value: orchestrator.selectedItem?.hasRichPreview)
                     }
                 }
 

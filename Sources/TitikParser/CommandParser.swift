@@ -34,12 +34,76 @@ public final class CommandParser {
             return .empty
         }
 
-        let lexer = CommandLexer(input: trimmed)
+        let lexer = CommandLexer(input: input)
         self.tokens = lexer.tokenize()
         self.position = 0
         self.hasOperatorOrFunc = false
 
-        // 1. Check for command prefix (e.g. app:safari, cmd:lock, clip:1)
+        // 1. Check for bang command (e.g. !e, !emoji, !emoji smile)
+        if case .bang(let bangName, let hasTrailingSpace) = current {
+            if !hasTrailingSpace && position + 1 >= tokens.count - 1 {
+                return .bangSuggestion(prefix: bangName)
+            }
+            _ = advance()
+            var args: [String] = []
+            var flags: [String: String] = [:]
+
+            while current != .eof {
+                switch current {
+                case .flag(let name, let value):
+                    flags[name] = value ?? "true"
+                    _ = advance()
+                case .identifier(let id):
+                    args.append(id)
+                    _ = advance()
+                case .stringLiteral(let s):
+                    args.append(s)
+                    _ = advance()
+                case .number(let n):
+                    if n.rounded() == n {
+                        args.append(String(Int(n)))
+                    } else {
+                        args.append(String(n))
+                    }
+                    _ = advance()
+                case .plus:
+                    args.append("+")
+                    _ = advance()
+                case .minus:
+                    args.append("-")
+                    _ = advance()
+                case .star:
+                    args.append("*")
+                    _ = advance()
+                case .slash:
+                    args.append("/")
+                    _ = advance()
+                case .percent:
+                    args.append("%")
+                    _ = advance()
+                case .caret:
+                    args.append("^")
+                    _ = advance()
+                case .equal:
+                    args.append("=")
+                    _ = advance()
+                case .lparen:
+                    args.append("(")
+                    _ = advance()
+                case .rparen:
+                    args.append(")")
+                    _ = advance()
+                case .comma:
+                    args.append(",")
+                    _ = advance()
+                default:
+                    _ = advance()
+                }
+            }
+            return .command(name: bangName, args: args, flags: flags)
+        }
+
+        // 2. Check for command prefix (e.g. app:safari, cmd:lock, clip:1)
         if case .prefix(let prefixName) = current {
             _ = advance()
             var args: [String] = []
@@ -63,8 +127,37 @@ public final class CommandParser {
                         args.append(String(n))
                     }
                     _ = advance()
+                case .plus:
+                    args.append("+")
+                    _ = advance()
+                case .minus:
+                    args.append("-")
+                    _ = advance()
+                case .star:
+                    args.append("*")
+                    _ = advance()
+                case .slash:
+                    args.append("/")
+                    _ = advance()
+                case .percent:
+                    args.append("%")
+                    _ = advance()
+                case .caret:
+                    args.append("^")
+                    _ = advance()
+                case .equal:
+                    args.append("=")
+                    _ = advance()
+                case .lparen:
+                    args.append("(")
+                    _ = advance()
+                case .rparen:
+                    args.append(")")
+                    _ = advance()
+                case .comma:
+                    args.append(",")
+                    _ = advance()
                 default:
-                    // Any other token
                     _ = advance()
                 }
             }

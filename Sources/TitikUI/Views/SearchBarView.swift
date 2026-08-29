@@ -34,17 +34,17 @@ public struct SearchBarView: View {
                 if let suffix = ghostSuffix {
                     HStack(spacing: 0) {
                         Text(text)
-                            .font(.system(size: 18, weight: .regular))
+                            .font(Theme.fontSearchInput)
                             .foregroundColor(.clear)
                         Text(suffix)
-                            .font(.system(size: 18, weight: .regular))
+                            .font(Theme.fontSearchPlaceholder)
                             .foregroundColor(Theme.textMuted.opacity(0.6))
                     }
                 }
 
                 TextField(placeholder, text: $text)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 18, weight: .regular))
+                    .font(Theme.fontSearchInput)
                     .foregroundColor(Theme.textPrimary)
                     .onSubmit {
                         onSubmit()
@@ -65,12 +65,16 @@ public struct SearchBarView: View {
         .padding(.horizontal, 16)
         .frame(height: 52)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.06))
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.black.opacity(0.18))
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.white.opacity(0.04))
+            }
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
         )
     }
 }

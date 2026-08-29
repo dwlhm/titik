@@ -26,7 +26,7 @@ public struct FooterView: View {
                     .fill(Theme.accent)
                     .frame(width: 6, height: 6)
                 Text("Titik")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .font(Theme.fontBrand)
                     .foregroundColor(Theme.textMuted)
             }
 
@@ -48,7 +48,7 @@ public struct FooterView: View {
                         KeycapView(shortcut: "←", label: "Back")
                     }
                     KeycapView(shortcut: "↵", label: "Open")
-                    KeycapView(shortcut: "⇥/→", label: isCategoryDirectory ? "Drill-in" : "Complete")
+                    KeycapView(shortcut: "⇥", label: isCategoryDirectory ? "Drill-in" : "Complete")
                     KeycapView(shortcut: "⌘K", label: "Actions")
                     KeycapView(shortcut: "!", label: "Modes")
                     KeycapView(shortcut: "⌘O", label: "Finder")
@@ -61,4 +61,3 @@ public struct FooterView: View {
         .frame(height: 32)
     }
 }
-
