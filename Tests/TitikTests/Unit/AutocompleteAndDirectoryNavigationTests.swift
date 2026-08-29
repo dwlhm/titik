@@ -26,9 +26,9 @@ struct AutocompleteAndDirectoryNavigationTests {
         #expect(formatted == "partner-v2/")
 
         // 2. UIOrchestrator test
+        orchestrator.query = "partner"
         orchestrator.results = [dirItem]
         orchestrator.selectedIndex = 0
-        orchestrator.query = "partner"
         orchestrator.autocompleteSelected()
 
         #expect(orchestrator.query == "partner-v2/")
