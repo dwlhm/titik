@@ -1,0 +1,589 @@
+import Foundation
+import AppKit
+import TitikCore
+@_exported import enum TitikCore.FuzzyMatcher
+@_exported import struct TitikCore.FuzzyMatchResult
+import TitikParser
+import TitikPlugins
+
+public final class SearchEngine: @unchecked Sendable {
+    public static let shared = SearchEngine()
+
+    private let appLauncher: AppLauncher
+    private let systemCommands: SystemCommands
+    private let clipboardManager: ClipboardManager
+    private let pluginHost: PluginHost
+    private let fileBrowser: FileBrowser
+    private let parser: CommandParser
+
+    public init(
+        appLauncher: AppLauncher = .shared,
+        systemCommands: SystemCommands = .shared,
+        clipboardManager: ClipboardManager = .shared,
+        pluginHost: PluginHost = .shared,
+        fileBrowser: FileBrowser = .shared,
+        parser: CommandParser = CommandParser()
+    ) {
+        self.appLauncher = appLauncher
+        self.systemCommands = systemCommands
+        self.clipboardManager = clipboardManager
+        self.pluginHost = pluginHost
+        self.fileBrowser = fileBrowser
+        self.parser = parser
+    }
+
+    public func search(query: String) -> [SearchItem] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Bang (!) prefix router
+        if trimmed.hasPrefix("!") {
+            if let (desc, subquery) = pluginHost.findActivePlugin(forQuery: trimmed) {
+                let pluginItems = pluginHost.queryPlugin(id: desc.id, subquery: subquery)
+                let searchCategory: SearchCategory = (desc.name.lowercased() == "math" || desc.id.contains("math")) ? .calculator : .plugin
+                return pluginItems.map { pItem in
+                    let cat: SearchCategory = pItem.category.lowercased() == "calculator" ? .calculator : searchCategory
+                    return SearchItem(
+                        id: "\(pItem.pluginId):\(pItem.id)",
+                        title: pItem.title,
+                        subtitle: pItem.subtitle,
+                        category: cat,
+                        score: pItem.scoreBoost + 500,
+                        actionPayload: pItem.actionPayload,
+                        previewDetail: "\(pItem.title)\n\(pItem.subtitle)",
+                        action: { [weak self] in
+                            self?.pluginHost.executeItem(pluginId: pItem.pluginId, itemId: pItem.id, actionPayload: pItem.actionPayload) ?? false
+                        }
+                    )
+                }
+            }
+            return handleBangQuery(trimmed)
+        }
+
+        // Path search check using PathResolver
+        if PathResolver.isPathQuery(trimmed) {
+            return fileBrowser.browseDirectory(path: trimmed)
+        }
+
+        let ast = parser.parse(trimmed)
+        var items: [SearchItem] = []
+
+        switch ast {
+        case .empty:
+            items = getDefaultItems()
+
+        case .expression(let exprAST):
+            // Math evaluation result
+            if let mathItem = evaluateMath(exprAST, rawQuery: trimmed, scoreBoost: 500) {
+                items.append(mathItem)
+            }
+            // Also search other items in background with lower priority
+            items.append(contentsOf: searchApplications(query: trimmed))
+            items.append(contentsOf: searchSystemCommands(query: trimmed))
+
+        case .command(let name, let args, _):
+            let argQuery = args.joined(separator: " ")
+            switch name.lowercased() {
+            case "app", "apps", "application":
+                items = searchApplications(query: argQuery)
+            case "cmd", "sys", "system", "command":
+                items = searchSystemCommands(query: argQuery)
+            case "clip", "clipboard", "cb":
+                items = searchClipboard(query: argQuery)
+            case "emoji", "emojis", "e":
+                if let bangEmoji = getBangSuggestions().first(where: { $0.id == "bang:emoji" }) {
+                    let bangItem = SearchItem(
+                        id: bangEmoji.id,
+                        title: bangEmoji.title,
+                        subtitle: bangEmoji.subtitle,
+                        category: bangEmoji.category,
+                        score: 200,
+                        actionPayload: bangEmoji.actionPayload,
+                        autocompletePayload: bangEmoji.autocompletePayload
+                    )
+                    items.append(bangItem)
+                }
+                items.append(contentsOf: searchEmojis(query: argQuery))
+            case "file", "f", "open", "folder", "browse", "find", "dir":
+                if argQuery.isEmpty {
+                    items = fileBrowser.browseDirectory(path: "~")
+                } else if PathResolver.isPathQuery(argQuery) {
+                    items = fileBrowser.browseDirectory(path: argQuery)
+                } else {
+                    let fileSearchResults = fileBrowser.searchFiles(query: argQuery)
+                    if fileSearchResults.isEmpty {
+                        items = fileBrowser.browseDirectory(path: argQuery)
+                    } else {
+                        items = fileSearchResults
+                    }
+                }
+            case "calc", "math", "calculate":
+                let mathAST = parser.parse(argQuery)
+                if case .expression(let expr) = mathAST,
+                   let mathItem = evaluateMath(expr, rawQuery: argQuery, scoreBoost: 600) {
+                    items.append(mathItem)
+                }
+            default:
+                // General search with this query
+                items = searchAllProviders(query: trimmed)
+            }
+
+        case .raw(let rawQuery):
+            // Check if it can be evaluated as math
+            let mathAST = parser.parse("= " + rawQuery)
+            if case .expression(let expr) = mathAST,
+               let mathItem = evaluateMath(expr, rawQuery: rawQuery, scoreBoost: 300) {
+                items.append(mathItem)
+            }
+
+            items.append(contentsOf: searchAllProviders(query: rawQuery))
+        }
+
+        // Sort descending by score
+        items.sort { $0.score > $1.score }
+        return items
+    }
+
+    public func handleBangQuery(_ rawQuery: String) -> [SearchItem] {
+        let withoutBang = String(rawQuery.dropFirst()).trimmingCharacters(in: .whitespaces)
+        if !rawQuery.contains(" ") {
+            let suggestions = getBangSuggestions()
+            if withoutBang.isEmpty {
+                return suggestions
+            }
+            let lower = rawQuery.lowercased()
+            let filtered = suggestions.filter { item in
+                let titleWord = item.title.components(separatedBy: " ").first?.lowercased() ?? item.title.lowercased()
+                let payloadWord = item.actionPayload.trimmingCharacters(in: .whitespaces).lowercased()
+                return titleWord.hasPrefix(lower) || payloadWord.hasPrefix(lower) || item.id.lowercased().contains(lower)
+            }
+            return filtered.isEmpty ? searchAllProviders(query: withoutBang) : filtered
+        }
+
+        let parts = withoutBang.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        let command = parts.first.map(String.init)?.lowercased() ?? ""
+        let subquery = parts.count > 1 ? String(parts[1]).trimmingCharacters(in: .whitespaces) : ""
+
+        switch command {
+        case "emoji", "emojis", "e":
+            if subquery.isEmpty {
+                var emojiResults: [SearchItem] = []
+                if let bangEmoji = getBangSuggestions().first(where: { $0.id == "bang:emoji" }) {
+                    let bangItem = SearchItem(
+                        id: bangEmoji.id,
+                        title: bangEmoji.title,
+                        subtitle: bangEmoji.subtitle,
+                        category: bangEmoji.category,
+                        score: 200,
+                        actionPayload: bangEmoji.actionPayload,
+                        autocompletePayload: bangEmoji.autocompletePayload
+                    )
+                    emojiResults.append(bangItem)
+                }
+                emojiResults.append(contentsOf: searchEmojis(query: ""))
+                return emojiResults
+            } else {
+                return searchEmojis(query: subquery)
+            }
+
+        case "file", "files", "f", "folder", "dir", "browse":
+            if subquery.isEmpty {
+                return fileBrowser.browseDirectory(path: "~")
+            } else if PathResolver.isPathQuery(subquery) {
+                return fileBrowser.browseDirectory(path: subquery)
+            } else {
+                let fileSearchResults = fileBrowser.searchFiles(query: subquery)
+                return fileSearchResults.isEmpty ? fileBrowser.browseDirectory(path: subquery) : fileSearchResults
+            }
+
+        case "app", "apps", "application":
+            return searchApplications(query: subquery)
+
+        case "clip", "clipboard", "cb", "history":
+            return searchClipboard(query: subquery)
+
+        case "cmd", "sys", "system", "command":
+            return searchSystemCommands(query: subquery)
+
+        case "calc", "math", "calculate":
+            let mathExpr = subquery.isEmpty ? "= 0" : (subquery.hasPrefix("=") ? subquery : "= " + subquery)
+            let mathAST = parser.parse(mathExpr)
+            if case .expression(let expr) = mathAST,
+               let mathItem = evaluateMath(expr, rawQuery: subquery, scoreBoost: 600) {
+                return [mathItem]
+            }
+            return []
+
+        default:
+            return searchAllProviders(query: withoutBang)
+        }
+    }
+
+    public func getBangSuggestions() -> [SearchItem] {
+        var suggestions: [SearchItem] = [
+            SearchItem(
+                id: "bang:emoji",
+                title: "!emoji",
+                subtitle: "Search & paste emojis with interactive grid",
+                category: .emoji,
+                score: 100,
+                actionPayload: "!emoji",
+                autocompletePayload: "!emoji "
+            ),
+            SearchItem(
+                id: "bang:file",
+                title: "!file <path/name>",
+                subtitle: "Search files or browse filesystem",
+                category: .file,
+                score: 95,
+                actionPayload: "!file ",
+                autocompletePayload: "!file "
+            ),
+            SearchItem(
+                id: "bang:app",
+                title: "!app <name>",
+                subtitle: "Scope search to applications",
+                category: .application,
+                score: 90,
+                actionPayload: "!app ",
+                autocompletePayload: "!app "
+            ),
+            SearchItem(
+                id: "bang:clip",
+                title: "!clip <query>",
+                subtitle: "Search clipboard history",
+                category: .clipboard,
+                score: 85,
+                actionPayload: "!clip ",
+                autocompletePayload: "!clip "
+            ),
+            SearchItem(
+                id: "bang:cmd",
+                title: "!cmd <command>",
+                subtitle: "Scope search to system commands",
+                category: .systemCommand,
+                score: 80,
+                actionPayload: "!cmd ",
+                autocompletePayload: "!cmd "
+            )
+        ]
+
+        let loaded = pluginHost.loadedPlugins()
+        for plugin in loaded {
+            let shortBang = plugin.shortBang.isEmpty ? "" : (plugin.shortBang.hasPrefix("!") ? plugin.shortBang : "!" + plugin.shortBang)
+            if !shortBang.isEmpty {
+                suggestions.append(
+                    SearchItem(
+                        id: "bang:\(plugin.id):short",
+                        title: "\(shortBang) <expression>",
+                        subtitle: plugin.description,
+                        category: .calculator,
+                        score: 75,
+                        actionPayload: "\(shortBang) ",
+                        autocompletePayload: "\(shortBang) "
+                    )
+                )
+            }
+            let nameBang = "!" + plugin.name.lowercased()
+            suggestions.append(
+                SearchItem(
+                    id: "bang:\(plugin.id):name",
+                    title: "\(nameBang) <expression>",
+                    subtitle: plugin.description,
+                    category: .calculator,
+                    score: 70,
+                    actionPayload: "\(nameBang) ",
+                    autocompletePayload: "\(nameBang) "
+                )
+            )
+        }
+
+        return suggestions
+    }
+
+    public func searchEmojis(query: String) -> [SearchItem] {
+        let emojis = EmojiCatalog.shared.search(query: query)
+        return emojis.map { emoji in
+            SearchItem(
+                id: "emoji:\(emoji.emoji)",
+                title: "\(emoji.emoji)  \(emoji.name)",
+                subtitle: "\(emoji.shortcode) • \(emoji.category.rawValue)",
+                category: .emoji,
+                score: 75,
+                actionPayload: emoji.emoji,
+                previewDetail: "Emoji: \(emoji.emoji)\nName: \(emoji.name)\nShortcode: \(emoji.shortcode)\nCategory: \(emoji.category.rawValue)\nUnicode: \(emoji.unicodeHex)\nKeywords: \(emoji.keywords.joined(separator: ", "))",
+                action: { [weak self] in
+                    self?.clipboardManager.copyToPasteboard(emoji.emoji)
+                    return true
+                }
+            )
+        }
+    }
+
+    private func searchAllProviders(query: String) -> [SearchItem] {
+        var results: [SearchItem] = []
+        results.append(contentsOf: searchApplications(query: query))
+        results.append(contentsOf: searchSystemCommands(query: query))
+        results.append(contentsOf: searchClipboard(query: query))
+        results.append(contentsOf: fileBrowser.searchFiles(query: query))
+        if !query.isEmpty {
+            let matchedEmojis = searchEmojis(query: query)
+            results.append(contentsOf: matchedEmojis.prefix(5))
+        }
+        return results
+    }
+
+    private func getDefaultItems() -> [SearchItem] {
+        var items: [SearchItem] = []
+
+        // Running Applications
+        let runningApps = appLauncher.getRunningApplications()
+        for app in runningApps {
+            items.append(
+                SearchItem(
+                    id: "running:\(app.bundleURL.path)",
+                    title: app.name,
+                    subtitle: "Running Application • Press Enter to switch",
+                    category: .application,
+                    score: 200,
+                    icon: app.icon,
+                    actionPayload: app.path,
+                    previewDetail: "Running Application: \(app.name)\nPath: \(app.path)",
+                    previewType: .none,
+                    previewURL: app.bundleURL,
+                    action: { [weak self] in
+                        self?.appLauncher.activateRunningApp(bundleURL: app.bundleURL, processIdentifier: app.processIdentifier) ?? false
+                    }
+                )
+            )
+        }
+
+        // System Commands
+        let cmds = systemCommands.getAllCommands()
+        for cmd in cmds.prefix(4) {
+            items.append(
+                SearchItem(
+                    id: cmd.id,
+                    title: cmd.title,
+                    subtitle: cmd.subtitle,
+                    category: .systemCommand,
+                    score: 90,
+                    actionPayload: cmd.id,
+                    previewDetail: "macOS System Command: \(cmd.title)\n\(cmd.subtitle)",
+                    previewType: .none,
+                    action: { cmd.action() }
+                )
+            )
+        }
+
+        // Recent Clipboard Items
+        let clips = clipboardManager.getItems()
+        for clip in clips.prefix(3) {
+            items.append(
+                SearchItem(
+                    id: "clip:\(clip.id.uuidString)",
+                    title: clip.preview,
+                    subtitle: "Copied (\(clip.lineCount) lines)",
+                    category: .clipboard,
+                    score: 80,
+                    actionPayload: clip.content,
+                    previewDetail: clip.content,
+                    previewType: .none,
+                    action: { [weak self] in
+                        self?.clipboardManager.copyToPasteboard(clip.content)
+                        return true
+                    }
+                )
+            )
+        }
+
+        return items
+    }
+
+    private func searchApplications(query: String) -> [SearchItem] {
+        let apps = appLauncher.getApplications()
+        var results: [SearchItem] = []
+
+        for app in apps {
+            if query.isEmpty {
+                results.append(
+                    SearchItem(
+                        id: "app:\(app.path)",
+                        title: app.name,
+                        subtitle: app.path,
+                        category: .application,
+                        score: 50,
+                        icon: app.icon,
+                        actionPayload: app.path,
+                        previewDetail: "Application: \(app.name)\nPath: \(app.path)",
+                        action: { [weak self] in
+                            self?.appLauncher.launchApp(at: app.path) ?? false
+                        }
+                    )
+                )
+            } else if let match = FuzzyMatcher.match(query: query, target: app.name) {
+                results.append(
+                    SearchItem(
+                        id: "app:\(app.path)",
+                        title: app.name,
+                        subtitle: app.path,
+                        category: .application,
+                        score: match.score + 50, // Base app preference bonus
+                        icon: app.icon,
+                        actionPayload: app.path,
+                        matchedIndices: match.matchedIndices,
+                        previewDetail: "Application: \(app.name)\nPath: \(app.path)",
+                        action: { [weak self] in
+                            self?.appLauncher.launchApp(at: app.path) ?? false
+                        }
+                    )
+                )
+            }
+        }
+        return results
+    }
+
+    private func searchSystemCommands(query: String) -> [SearchItem] {
+        let cmds = systemCommands.getAllCommands()
+        var results: [SearchItem] = []
+
+        for cmd in cmds {
+            if query.isEmpty {
+                results.append(
+                    SearchItem(
+                        id: cmd.id,
+                        title: cmd.title,
+                        subtitle: cmd.subtitle,
+                        category: .systemCommand,
+                        score: 40,
+                        actionPayload: cmd.id,
+                        previewDetail: "macOS System Command: \(cmd.title)\n\(cmd.subtitle)",
+                        action: { cmd.action() }
+                    )
+                )
+                continue
+            }
+
+            var bestScore: Int? = nil
+            var bestIndices: [Int] = []
+
+            if let titleMatch = FuzzyMatcher.match(query: query, target: cmd.title) {
+                bestScore = titleMatch.score
+                bestIndices = titleMatch.matchedIndices
+            }
+
+            for kw in cmd.keywords {
+                if let kwMatch = FuzzyMatcher.match(query: query, target: kw) {
+                    let score = kwMatch.score - 10
+                    if bestScore == nil || score > bestScore! {
+                        bestScore = score
+                    }
+                }
+            }
+
+            if let score = bestScore {
+                results.append(
+                    SearchItem(
+                        id: cmd.id,
+                        title: cmd.title,
+                        subtitle: cmd.subtitle,
+                        category: .systemCommand,
+                        score: score + 40,
+                        actionPayload: cmd.id,
+                        matchedIndices: bestIndices,
+                        previewDetail: "macOS System Command: \(cmd.title)\n\(cmd.subtitle)",
+                        action: { cmd.action() }
+                    )
+                )
+            }
+        }
+        return results
+    }
+
+    private func searchClipboard(query: String) -> [SearchItem] {
+        let items = clipboardManager.getItems()
+        var results: [SearchItem] = []
+
+        for clip in items {
+            if query.isEmpty {
+                results.append(
+                    SearchItem(
+                        id: "clip:\(clip.id.uuidString)",
+                        title: clip.preview,
+                        subtitle: "\(clip.lineCount) line(s)",
+                        category: .clipboard,
+                        score: 30,
+                        actionPayload: clip.content,
+                        previewDetail: clip.content,
+                        action: { [weak self] in
+                            self?.clipboardManager.copyToPasteboard(clip.content)
+                            return true
+                        }
+                    )
+                )
+            } else if let match = FuzzyMatcher.match(query: query, target: clip.content) {
+                results.append(
+                    SearchItem(
+                        id: "clip:\(clip.id.uuidString)",
+                        title: clip.preview,
+                        subtitle: "\(clip.lineCount) line(s)",
+                        category: .clipboard,
+                        score: match.score + 20,
+                        actionPayload: clip.content,
+                        matchedIndices: match.matchedIndices,
+                        previewDetail: clip.content,
+                        action: { [weak self] in
+                            self?.clipboardManager.copyToPasteboard(clip.content)
+                            return true
+                        }
+                    )
+                )
+            }
+        }
+        return results
+    }
+
+    private func searchPlugins(query: String) -> [SearchItem] {
+        let pluginItems = pluginHost.queryAll(query: query)
+        var results: [SearchItem] = []
+
+        for pItem in pluginItems {
+            results.append(
+                SearchItem(
+                    id: "\(pItem.pluginId):\(pItem.id)",
+                    title: pItem.title,
+                    subtitle: pItem.subtitle,
+                    category: .plugin,
+                    score: pItem.scoreBoost + 100,
+                    actionPayload: pItem.actionPayload,
+                    previewDetail: "\(pItem.title)\n\(pItem.subtitle)",
+                    action: { [weak self] in
+                        self?.pluginHost.executeItem(pluginId: pItem.pluginId, itemId: pItem.id, actionPayload: pItem.actionPayload) ?? false
+                    }
+                )
+            )
+        }
+        return results
+    }
+
+    private func evaluateMath(_ ast: MathExpressionAST, rawQuery: String, scoreBoost: Int) -> SearchItem? {
+        do {
+            let result = try MathEvaluator.evaluate(ast)
+            let formatted = MathEvaluator.formatResult(result)
+            return SearchItem(
+                id: "math:result",
+                title: formatted,
+                subtitle: "\(rawQuery)  (Press Enter to copy)",
+                category: .calculator,
+                score: scoreBoost + 200,
+                actionPayload: formatted,
+                previewDetail: "Expression: \(rawQuery)\nResult: \(formatted)",
+                action: { [weak self] in
+                    self?.clipboardManager.copyToPasteboard(formatted)
+                    return true
+                }
+            )
+        } catch {
+            return nil
+        }
+    }
+}

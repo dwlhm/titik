@@ -1,0 +1,64 @@
+import SwiftUI
+
+public struct FooterView: View {
+    public var isPluginActive: Bool
+    public var isActionPaletteActive: Bool
+    public var isCategoryDirectory: Bool
+    public var canGoBack: Bool
+
+    public init(
+        isPluginActive: Bool = false,
+        isActionPaletteActive: Bool = false,
+        isCategoryDirectory: Bool = false,
+        canGoBack: Bool = false
+    ) {
+        self.isPluginActive = isPluginActive
+        self.isActionPaletteActive = isActionPaletteActive
+        self.isCategoryDirectory = isCategoryDirectory
+        self.canGoBack = canGoBack
+    }
+
+    public var body: some View {
+        HStack(spacing: 16) {
+            // Brand Label
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(Theme.accent)
+                    .frame(width: 6, height: 6)
+                Text("Titik")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(Theme.textMuted)
+            }
+
+            Spacer()
+
+            // Dynamic Keycap Actions
+            HStack(spacing: 12) {
+                if isActionPaletteActive {
+                    KeycapView(shortcut: "↵", label: "Execute")
+                    KeycapView(shortcut: "↑↓", label: "Navigate")
+                    KeycapView(shortcut: "esc", label: "Dismiss")
+                } else if isPluginActive {
+                    KeycapView(shortcut: "↵", label: "Paste")
+                    KeycapView(shortcut: "⇥", label: "Category")
+                    KeycapView(shortcut: "←↑↓→", label: "Select")
+                    KeycapView(shortcut: "esc", label: "Close")
+                } else {
+                    if canGoBack {
+                        KeycapView(shortcut: "←", label: "Back")
+                    }
+                    KeycapView(shortcut: "↵", label: "Open")
+                    KeycapView(shortcut: "⇥/→", label: isCategoryDirectory ? "Drill-in" : "Complete")
+                    KeycapView(shortcut: "⌘K", label: "Actions")
+                    KeycapView(shortcut: "!", label: "Modes")
+                    KeycapView(shortcut: "⌘O", label: "Finder")
+                    KeycapView(shortcut: "⌘C", label: "Copy")
+                    KeycapView(shortcut: "esc", label: "Close")
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 32)
+    }
+}
+

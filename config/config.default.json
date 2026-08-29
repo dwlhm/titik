@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "comment": "Titik macOS Command Center Configuration - Native Liquid Glass and Spring Physics",
+  "window": {
+    "width": 720,
+    "height": 460,
+    "corner_radius": 16.0,
+    "border_width": 1.0,
+    "blur_material": "hud"
+  },
+  "animation": {
+    "spring_stiffness": 320.0,
+    "spring_damping": 28.0,
+    "spring_mass": 1.0,
+    "window_open_duration": 0.18
+  },
+  "hotkey": {
+    "modifier": "cmd",
+    "key": "."
+  },
+  "theme": {
+    "bg_glass_tint": "#14162838",
+    "border_color": "#ffffff14",
+    "text_primary": "#ffffff",
+    "text_secondary": "#cbd5e1",
+    "text_muted": "#94a3b8",
+    "accent_color": "#a5b4fc",
+    "selection_bg": "#a5b4fc2d",
+    "badge_bg": "#93c5fd33",
+    "card_bg": "#ffffff0c"
+  },
+  "layout": {
+    "split_ratio": 0.60,
+    "item_height": 44.0,
+    "search_bar_height": 56.0,
+    "footer_height": 36.0,
+    "font_size_search": 18,
+    "font_size_title": 15,
+    "font_size_subtitle": 12,
+    "font_size_badge": 10,
+    "font_size_preview": 13
+  },
+  "behaviors": {
+    "auto_hide_on_blur": true,
+    "max_clipboard_history": 100,
+    "show_preview_pane": true,
+    "excluded_apps": []
+  }
+}

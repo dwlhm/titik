@@ -1,0 +1,31 @@
+# Swift & SPM
+.build/
+.swiftpm/
+*.profraw
+*.profdata
+
+# Build output & C plugins
+bin/
+*.dylib
+*.o
+*.a
+*.so
+*.dSYM
+
+# macOS & OS artifacts
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Icon?
+Thumbs.db
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+
+# Local state & logs
+*.log
