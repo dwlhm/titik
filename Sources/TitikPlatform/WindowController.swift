@@ -6,6 +6,42 @@ import TitikCore
 public final class FloatingPanel: NSPanel {
     public override var canBecomeKey: Bool { true }
     public override var canBecomeMain: Bool { true }
+
+    public override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.contains(.command) {
+            guard let chars = event.charactersIgnoringModifiers?.lowercased() else {
+                return super.performKeyEquivalent(with: event)
+            }
+            switch chars {
+            case "v":
+                if NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: self) {
+                    return true
+                }
+            case "c":
+                if let textView = firstResponder as? NSTextView, textView.selectedRange().length > 0 {
+                    if NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: self) {
+                        return true
+                    }
+                }
+            case "a":
+                if NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: self) {
+                    return true
+                }
+            case "x":
+                if NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: self) {
+                    return true
+                }
+            case "z":
+                let action = event.modifierFlags.contains(.shift) ? Selector(("redo:")) : Selector(("undo:"))
+                if NSApp.sendAction(action, to: nil, from: self) {
+                    return true
+                }
+            default:
+                break
+            }
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 }
 
 @MainActor

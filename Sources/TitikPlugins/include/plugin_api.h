@@ -65,7 +65,7 @@ typedef struct TitikPlugin {
     const char *name;           /* Human-readable plugin name */
     const char *version;        /* Semantic version string (e.g. "1.0.0") */
     const char *description;    /* Short description of plugin capabilities */
-    const char *short_bang;     /* Short-bang trigger defined by plugin (e.g. "!calc" or "!m") */
+    const char *short_bang;     /* Plain short-bang trigger without leading '!' (e.g. "calc" or "m") */
 
     TitikPluginInitFn init;         /* Plugin initialization proc */
     TitikPluginQueryFn query;       /* Query handler proc */

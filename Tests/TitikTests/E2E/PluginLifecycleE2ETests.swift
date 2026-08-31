@@ -22,7 +22,7 @@ struct PluginLifecycleE2ETests {
         let mathDescriptor = loadedPlugins.first { $0.id == "titik.plugin.math" }
         #expect(mathDescriptor != nil)
         #expect(mathDescriptor?.name == "math")
-        #expect(mathDescriptor?.shortBang == "!calc")
+        #expect(mathDescriptor?.shortBang == "calc")
 
         // 2. Test findActivePlugin
         let activeShort = host.findActivePlugin(forQuery: "!calc 12 * 12")
@@ -35,8 +35,9 @@ struct PluginLifecycleE2ETests {
         #expect(activeName?.descriptor.id == "titik.plugin.math")
         #expect(activeName?.subquery == "12 * 12")
 
-        let noSpace = host.findActivePlugin(forQuery: "!calc")
-        #expect(noSpace == nil)
+        let exactBang = host.findActivePlugin(forQuery: "!calc")
+        #expect(exactBang != nil)
+        #expect(exactBang?.subquery == "")
 
         let noBang = host.findActivePlugin(forQuery: "calc 12 * 12")
         #expect(noBang == nil)

@@ -208,34 +208,54 @@ public final class SearchEngine: @unchecked Sendable {
             )
         ]
 
-        let loaded = pluginHost.loadedPlugins()
-        for plugin in loaded {
-            let shortBang = plugin.shortBang.isEmpty ? "" : (plugin.shortBang.hasPrefix("!") ? plugin.shortBang : "!" + plugin.shortBang)
-            if !shortBang.isEmpty {
+        let nativePlugins = pluginHost.allNativePlugins()
+        for native in nativePlugins {
+            for bang in native.manifest.normalizedBangs {
+                let clean = bang.lowercased()
                 suggestions.append(
                     SearchItem(
-                        id: "bang:\(plugin.id):short",
-                        title: "\(shortBang) <expression>",
-                        subtitle: plugin.description,
-                        category: .calculator,
+                        id: "bang:\(native.manifest.id):\(clean)",
+                        title: "!\(clean) <query>",
+                        subtitle: native.manifest.description,
+                        category: .plugin,
                         score: 75,
-                        actionPayload: "\(shortBang) ",
-                        autocompletePayload: "\(shortBang) "
+                        actionPayload: "!\(clean) ",
+                        autocompletePayload: "!\(clean) "
                     )
                 )
             }
-            let nameBang = "!" + plugin.name.lowercased()
-            suggestions.append(
-                SearchItem(
-                    id: "bang:\(plugin.id):name",
-                    title: "\(nameBang) <expression>",
-                    subtitle: plugin.description,
-                    category: .calculator,
-                    score: 70,
-                    actionPayload: "\(nameBang) ",
-                    autocompletePayload: "\(nameBang) "
+        }
+
+        let loaded = pluginHost.loadedPlugins()
+        for plugin in loaded {
+            if nativePlugins.contains(where: { $0.manifest.id == plugin.id }) {
+                continue
+            }
+            var bangs: [String] = []
+            let short = plugin.shortBang.hasPrefix("!") ? String(plugin.shortBang.dropFirst()) : plugin.shortBang
+            if !short.isEmpty {
+                bangs.append(short.lowercased())
+            }
+            let name = plugin.name.hasPrefix("!") ? String(plugin.name.dropFirst()) : plugin.name
+            if !name.isEmpty && !bangs.contains(name.lowercased()) {
+                bangs.append(name.lowercased())
+            }
+
+            let cat: SearchCategory = (plugin.name.lowercased() == "math" || plugin.id.contains("math")) ? .calculator : .plugin
+
+            for bang in bangs {
+                suggestions.append(
+                    SearchItem(
+                        id: "bang:\(plugin.id):\(bang)",
+                        title: "!\(bang) <query>",
+                        subtitle: plugin.description,
+                        category: cat,
+                        score: 75,
+                        actionPayload: "!\(bang) ",
+                        autocompletePayload: "!\(bang) "
+                    )
                 )
-            )
+            }
         }
 
         return suggestions

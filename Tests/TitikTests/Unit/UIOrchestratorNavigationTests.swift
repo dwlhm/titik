@@ -2,6 +2,9 @@ import Testing
 import Foundation
 import TitikCore
 import TitikPlatform
+import TitikPlugins
+import TitikSearch
+import TitikPluginKit
 
 @Suite("UIOrchestrator Navigation Tests")
 @MainActor
@@ -363,6 +366,21 @@ struct UIOrchestratorNavigationTests {
         orchestrator.executeSelected()
 
         #expect(orchestrator.query == "!file ")
+    }
+
+    @Test("MathPlugin clean identifier bang activation with space")
+    func test_mathPlugin_cleanIdentifier_bangActivationWithSpace() {
+        let host = PluginHost.shared
+        _ = host.loadPlugin(at: "plugins/math_plugin/math.dylib")
+        let engine = SearchEngine(pluginHost: host)
+
+        let results = engine.search(query: "!calc 20 + 30")
+        #expect(!results.isEmpty)
+        #expect(results.first?.title == "50")
+
+        let resultsMath = engine.search(query: "!math 20 + 30")
+        #expect(!resultsMath.isEmpty)
+        #expect(resultsMath.first?.title == "50")
     }
 }
 

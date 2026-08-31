@@ -6,6 +6,7 @@ import TitikUI
 import TitikSearch
 import TitikPlugins
 import TitikParser
+import TitikPluginKit
 
 @MainActor
 public final class UIOrchestrator: ObservableObject {
@@ -34,6 +35,9 @@ public final class UIOrchestrator: ObservableObject {
     public init(searchEngine: SearchEngine = .shared, fileBrowser: FileBrowser = .shared) {
         self.searchEngine = searchEngine
         self.fileBrowser = fileBrowser
+        WindowController.shared.onWindowClosed = {
+            PluginHost.shared.cancelAllActiveTasks()
+        }
         performSearch("")
         setupKeyMonitor()
     }
@@ -108,6 +112,7 @@ public final class UIOrchestrator: ObservableObject {
             return
 
         default:
+            PluginHost.shared.cancelAllActiveTasks()
             self.activePluginUI = nil
             let items = searchEngine.search(query: q)
             self.results = items
@@ -152,6 +157,11 @@ public final class UIOrchestrator: ObservableObject {
     }
 
     public func executeSelected() {
+        if let plugin = activePluginUI {
+            plugin.submitQuery()
+            return
+        }
+
         guard let item = selectedItem else { return }
         Logger.shared.info("Executing item: \(item.title) (\(item.category))", subsystem: "Titik.Orchestrator")
 
@@ -182,6 +192,7 @@ public final class UIOrchestrator: ObservableObject {
     }
 
     public func reset() {
+        PluginHost.shared.cancelAllActiveTasks()
         activeSession = nil
         query = ""
         selectedIndex = 0
@@ -478,6 +489,10 @@ public final class UIOrchestrator: ObservableObject {
                     WindowController.shared.hideWindow()
                     return nil
                 }
+                if code == Keycode.returnKey.rawValue {
+                    plugin.submitQuery()
+                    return nil
+                }
                 if plugin.handleKeyDown(event: event) {
                     return nil
                 }
@@ -606,6 +621,7 @@ public struct MainContentView: View {
                     if let pluginUI = orchestrator.activePluginUI {
                         PluginContainerView(pluginUI: pluginUI)
                             .frame(width: geo.size.width, height: geo.size.height)
+                            .clipped()
                             .transition(.opacity)
                     } else {
                         let hasPreview = orchestrator.selectedItem?.hasRichPreview == true
@@ -636,6 +652,8 @@ public struct MainContentView: View {
                         .animation(Theme.springInteractive, value: orchestrator.selectedItem?.hasRichPreview)
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
 
                 // Footer
                 FooterView(

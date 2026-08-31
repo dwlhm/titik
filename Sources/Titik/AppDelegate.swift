@@ -7,10 +7,13 @@ import TitikUI
 import TitikSearch
 import TitikPlatform
 import TitikPlugins
+import TitikPluginKit
 
+@MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate {
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        setupMainMenu()
 
         // 1. Load configuration
         let config = ConfigLoader.shared.load()
@@ -68,5 +71,34 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         ClipboardManager.shared.stopMonitoring()
         PluginHost.shared.shutdownAll()
         Logger.shared.info("Titik terminated cleanly", subsystem: "Titik.App")
+    }
+
+    private func setupMainMenu() {
+        let mainMenu = NSMenu()
+
+        // App Menu
+        let appMenuItem = NSMenuItem()
+        mainMenu.addItem(appMenuItem)
+        let appMenu = NSMenu()
+        appMenuItem.submenu = appMenu
+        appMenu.addItem(withTitle: "Quit Titik", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        // Edit Menu
+        let editMenuItem = NSMenuItem()
+        mainMenu.addItem(editMenuItem)
+        let editMenu = NSMenu(title: "Edit")
+        editMenuItem.submenu = editMenu
+
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        let redoItem = NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        redoItem.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(redoItem)
+        editMenu.addItem(NSMenuItem.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+
+        NSApp.mainMenu = mainMenu
     }
 }

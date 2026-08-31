@@ -1,0 +1,61 @@
+import Foundation
+
+public struct URLSanitizer: Sendable {
+    public static func sanitize(_ urlString: String) -> URL? {
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed) else {
+            return nil
+        }
+        guard let scheme = url.scheme?.lowercased() else {
+            return nil
+        }
+        // Block dangerous schemes
+        let forbiddenSchemes: Set<String> = [
+            "file", "applescript", "terminal", "javascript", "data", "blob", "vbscript", "about"
+        ]
+        if forbiddenSchemes.contains(scheme) {
+            return nil
+        }
+        // Only allow safe HTTPS (or HTTP if specifically formatted)
+        guard scheme == "https" || scheme == "http" else {
+            return nil
+        }
+        guard let host = url.host, !host.isEmpty else {
+            return nil
+        }
+        return url
+    }
+
+    public static func isSafeURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else {
+            return false
+        }
+        let forbiddenSchemes: Set<String> = [
+            "file", "applescript", "terminal", "javascript", "data", "blob", "vbscript", "about"
+        ]
+        if forbiddenSchemes.contains(scheme) {
+            return false
+        }
+        return scheme == "https" || scheme == "http"
+    }
+}
+
+public final class PluginContext: @unchecked Sendable {
+    public let pluginId: String
+    public let keychain: PluginKeychainService
+    public let storageDirectory: URL
+    public let temporaryDirectory: URL
+
+    public init(pluginId: String, keychain: PluginKeychainService? = nil, baseStorageURL: URL? = nil) {
+        self.pluginId = pluginId
+        self.keychain = keychain ?? HostKeychainService(pluginId: pluginId)
+
+        let base = baseStorageURL ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let pluginDir = base.appendingPathComponent("Titik").appendingPathComponent("Plugins").appendingPathComponent(pluginId)
+        self.storageDirectory = pluginDir
+        self.temporaryDirectory = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("titik_plugin_\(pluginId)")
+
+        try? FileManager.default.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+    }
+}
