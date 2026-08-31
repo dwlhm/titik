@@ -38,6 +38,7 @@ public final class UIOrchestrator: ObservableObject {
         WindowController.shared.onWindowClosed = {
             PluginHost.shared.cancelAllActiveTasks()
         }
+        PluginManager.shared.reindex()
         performSearch("")
         setupKeyMonitor()
     }
@@ -97,19 +98,28 @@ public final class UIOrchestrator: ObservableObject {
 
         switch ast {
         case .command(let name, let args, _) where ["emoji", "emojis", "e"].contains(name.lowercased()):
-            let subquery = args.joined(separator: " ")
-            let plugin = EmojiPlugin.shared
-            plugin.onSelectEmoji = { [weak self] emoji in
-                let success = AutoPaster.shared.pasteToActiveApp(content: emoji.emoji)
-                if success {
-                    self?.reset()
+            if PluginHost.shared.getNativePlugin(id: TitikPlugins.EmojiPlugin.id) != nil {
+                let subquery = args.joined(separator: " ")
+                let plugin = TitikUI.EmojiPlugin.shared
+                plugin.onSelectEmoji = { [weak self] emoji in
+                    let success = AutoPaster.shared.pasteToActiveApp(content: emoji.emoji)
+                    if success {
+                        self?.reset()
+                    }
                 }
+                plugin.handleSearchQuery(subquery)
+                self.activePluginUI = plugin
+                self.results = []
+                self.selectedIndex = 0
+                return
+            } else {
+                PluginHost.shared.cancelAllActiveTasks()
+                self.activePluginUI = nil
+                let items = searchEngine.search(query: q)
+                self.results = items
+                self.selectedIndex = 0
+                return
             }
-            plugin.handleSearchQuery(subquery)
-            self.activePluginUI = plugin
-            self.results = []
-            self.selectedIndex = 0
-            return
 
         default:
             PluginHost.shared.cancelAllActiveTasks()
@@ -282,7 +292,7 @@ public final class UIOrchestrator: ObservableObject {
                 currentActions = actionsForItem(item)
                 selectedActionIndex = 0
                 isActionPaletteVisible = !currentActions.isEmpty
-            } else if let plugin = activePluginUI as? EmojiPlugin, let emoji = plugin.selectedEmoji {
+            } else if let plugin = activePluginUI as? TitikUI.EmojiPlugin, let emoji = plugin.selectedEmoji {
                 currentActions = actionsForEmoji(emoji)
                 selectedActionIndex = 0
                 isActionPaletteVisible = !currentActions.isEmpty

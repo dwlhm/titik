@@ -1,4 +1,5 @@
 import Foundation
+import TitikUI
 
 public struct URLSanitizer: Sendable {
     public static func sanitize(_ urlString: String) -> URL? {
@@ -57,5 +58,20 @@ public final class PluginContext: @unchecked Sendable {
 
         try? FileManager.default.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+    }
+
+    @MainActor
+    public func showToast(
+        message: String,
+        icon: String? = nil,
+        type: ToastType = .info,
+        duration: TimeInterval = 2.5
+    ) {
+        ToastManager.shared.show(message: message, icon: icon, type: type, duration: duration)
+    }
+
+    @MainActor
+    public func dismissToast() {
+        ToastManager.shared.dismiss()
     }
 }

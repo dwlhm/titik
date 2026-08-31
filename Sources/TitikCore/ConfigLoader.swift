@@ -73,7 +73,7 @@ public struct RGBAColor: Equatable, Sendable {
 public final class ConfigLoader: @unchecked Sendable {
     public static let shared = ConfigLoader()
 
-    public private(set) var currentConfig: Config
+    public var currentConfig: Config
 
     public init(config: Config = Config()) {
         self.currentConfig = config
@@ -100,7 +100,10 @@ public final class ConfigLoader: @unchecked Sendable {
 
     @discardableResult
     public func load(from url: URL? = nil) -> Config {
-        let targetURL = url ?? ConfigLoader.userConfigPath
+        let targetURL = url ?? (self === ConfigLoader.shared ? ConfigLoader.userConfigPath : nil)
+        guard let targetURL else {
+            return self.currentConfig
+        }
 
         if FileManager.default.fileExists(atPath: targetURL.path) {
             do {
@@ -132,4 +135,20 @@ public final class ConfigLoader: @unchecked Sendable {
         self.currentConfig = Config()
         return self.currentConfig
     }
+
+    /// Persists currentConfig to ~/.config/titik/config.json atomically.
+    /// - Throws: if directory creation or file write fails.
+    public func save() throws {
+        let url = ConfigLoader.userConfigPath
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(currentConfig)
+        try data.write(to: url, options: .atomic)
+        Logger.shared.info("Saved configuration to \(url.path)", subsystem: "Titik.Config")
+    }
 }
+

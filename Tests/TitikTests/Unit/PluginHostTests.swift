@@ -9,23 +9,15 @@ struct PluginHostTests {
         let host = PluginHost()
         defer { host.shutdownAll() }
 
-        let success = host.loadPlugin(at: "/tmp/non_existent_plugin_12345.dylib")
+        let success = host.loadPlugin(at: "/tmp/non_existent_plugin_12345.titikplugin")
         #expect(!success)
     }
 
-    @Test("Load real math plugin")
-    func testLoadRealMathPluginIfPresent() {
+    @Test("Loaded manifests starts empty")
+    func testLoadedManifestsStartsEmpty() {
         let host = PluginHost()
         defer { host.shutdownAll() }
-
-        let mathPluginPath = "plugins/math_plugin/math.dylib"
-        if FileManager.default.fileExists(atPath: mathPluginPath) {
-            let loaded = host.loadPlugin(at: mathPluginPath)
-            #expect(loaded)
-
-            let results = host.queryAll(query: "25 * 4")
-            #expect(!results.isEmpty)
-            #expect(results.first?.title == "100")
-        }
+        #expect(host.loadedManifests().isEmpty)
     }
 }
+

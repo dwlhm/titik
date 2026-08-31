@@ -1,20 +1,18 @@
 SWIFT_TEST_FLAGS = -Xswiftc -F/Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/usr/lib
-SWIFT_ENV = DYLD_LIBRARY_PATH=/Library/Developer/CommandLineTools/Library/Developer/usr/lib DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/Library/Developer/Frameworks
+SWIFT_ENV = CLANG_MODULE_CACHE_PATH=$(CURDIR)/.build/clang-cache TMPDIR=$(CURDIR)/.build/tmp DYLD_LIBRARY_PATH=/Library/Developer/CommandLineTools/Library/Developer/usr/lib DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/Library/Developer/Frameworks
 
-all: setup plugins build
+all: setup build
 
 setup:
 	@bash scripts/setup_config.sh
 
-plugins:
-	@$(MAKE) -C plugins/math_plugin
-
-build: plugins
+build:
 	@echo "==> Building Titik Swift release binary..."
-	@swift build -c release
-	@mkdir -p bin
+	@mkdir -p .build/clang-cache .build/tmp bin
+	@$(SWIFT_ENV) swift build -c release --disable-sandbox
 	@cp .build/release/titik bin/titik
-	@echo "==> Binary built at bin/titik"
+	@cp .build/release/titik-worker bin/titik-worker
+	@echo "==> Binaries built at bin/titik and bin/titik-worker"
 
 bundle: build
 	@bash scripts/build_bundle.sh
@@ -28,13 +26,12 @@ install: bundle
 run: build
 	@./bin/titik
 
-test: plugins
+test:
 	@echo "==> Running Swift test suite..."
-	@$(SWIFT_ENV) swift test $(SWIFT_TEST_FLAGS)
+	@$(SWIFT_ENV) swift test --disable-sandbox $(SWIFT_TEST_FLAGS)
 
 clean:
 	@rm -rf bin .build
-	@$(MAKE) -C plugins/math_plugin clean
 	@echo "==> Clean complete."
 
-.PHONY: all setup plugins build bundle install run clean test
+.PHONY: all setup build bundle install run clean test

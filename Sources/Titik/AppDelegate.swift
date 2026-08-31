@@ -32,7 +32,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         ClipboardManager.shared.startMonitoring()
 
         // 5. Load plugins
-        PluginHost.shared.loadAll()
+        PluginManager.shared.reindex()
 
         // 6. Setup main window
         let contentView = AnyView(MainContentView(orchestrator: UIOrchestrator.shared))

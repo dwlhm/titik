@@ -5,6 +5,7 @@ import TitikCore
 @_exported import struct TitikCore.FuzzyMatchResult
 import TitikParser
 import TitikPlugins
+import TitikPluginKit
 
 public final class SearchEngine: @unchecked Sendable {
     public static let shared = SearchEngine()
@@ -70,22 +71,48 @@ public final class SearchEngine: @unchecked Sendable {
             items.append(contentsOf: searchSystemCommands(query: trimmed))
 
         case .command(let name, let args, _):
-            if let desc = pluginHost.findActivePlugin(command: name) {
+            if let manifest = pluginHost.findActivePlugin(command: name) {
                 let subquery = args.joined(separator: " ")
-                let pluginItems = pluginHost.queryPlugin(id: desc.id, subquery: subquery)
-                let searchCategory: SearchCategory = (desc.name.lowercased() == "math" || desc.id.contains("math")) ? .calculator : .plugin
+                nonisolated(unsafe) var pluginItems: [PluginItem] = []
+                let sema = DispatchSemaphore(value: 0)
+                Task {
+                    let (_, stream) = pluginHost.query(pluginId: manifest.id, query: subquery)
+                    for await response in stream {
+                        if case .listResult(_, let items) = response {
+                            pluginItems = items
+                        }
+                    }
+                    sema.signal()
+                }
+                _ = sema.wait(timeout: .now() + .milliseconds(1500))
+
                 return pluginItems.map { pItem in
-                    let cat: SearchCategory = pItem.category.lowercased() == "calculator" ? .calculator : searchCategory
+                    let searchCategory: SearchCategory
+                    if manifest.id == "titik.builtin.emoji" || pItem.category.lowercased() == "emoji" {
+                        searchCategory = .emoji
+                    } else {
+                        searchCategory = .plugin
+                    }
                     return SearchItem(
-                        id: "\(pItem.pluginId):\(pItem.id)",
+                        id: "\(manifest.id):\(pItem.id)",
                         title: pItem.title,
                         subtitle: pItem.subtitle,
-                        category: cat,
+                        category: searchCategory,
                         score: pItem.scoreBoost + 500,
                         actionPayload: pItem.actionPayload,
                         previewDetail: "\(pItem.title)\n\(pItem.subtitle)",
                         action: { [weak self] in
-                            self?.pluginHost.executeItem(pluginId: pItem.pluginId, itemId: pItem.id, actionPayload: pItem.actionPayload) ?? false
+                            if pItem.pluginId == "titik.system.plugin" || manifest.id == "titik.system.plugin" {
+                                if pItem.actionPayload == "reload" {
+                                    PluginManager.shared.reindex()
+                                    return true
+                                }
+                            }
+                            if !pItem.actionPayload.isEmpty {
+                                self?.clipboardManager.copyToPasteboard(pItem.actionPayload)
+                                return true
+                            }
+                            return false
                         }
                     )
                 }
@@ -226,38 +253,6 @@ public final class SearchEngine: @unchecked Sendable {
             }
         }
 
-        let loaded = pluginHost.loadedPlugins()
-        for plugin in loaded {
-            if nativePlugins.contains(where: { $0.manifest.id == plugin.id }) {
-                continue
-            }
-            var bangs: [String] = []
-            let short = plugin.shortBang.hasPrefix("!") ? String(plugin.shortBang.dropFirst()) : plugin.shortBang
-            if !short.isEmpty {
-                bangs.append(short.lowercased())
-            }
-            let name = plugin.name.hasPrefix("!") ? String(plugin.name.dropFirst()) : plugin.name
-            if !name.isEmpty && !bangs.contains(name.lowercased()) {
-                bangs.append(name.lowercased())
-            }
-
-            let cat: SearchCategory = (plugin.name.lowercased() == "math" || plugin.id.contains("math")) ? .calculator : .plugin
-
-            for bang in bangs {
-                suggestions.append(
-                    SearchItem(
-                        id: "bang:\(plugin.id):\(bang)",
-                        title: "!\(bang) <query>",
-                        subtitle: plugin.description,
-                        category: cat,
-                        score: 75,
-                        actionPayload: "!\(bang) ",
-                        autocompletePayload: "!\(bang) "
-                    )
-                )
-            }
-        }
-
         return suggestions
     }
 
@@ -286,10 +281,6 @@ public final class SearchEngine: @unchecked Sendable {
         results.append(contentsOf: searchSystemCommands(query: query))
         results.append(contentsOf: searchClipboard(query: query))
         results.append(contentsOf: fileBrowser.searchFiles(query: query))
-        if !query.isEmpty {
-            let matchedEmojis = searchEmojis(query: query)
-            results.append(contentsOf: matchedEmojis.prefix(5))
-        }
         return results
     }
 
@@ -499,29 +490,6 @@ public final class SearchEngine: @unchecked Sendable {
                     )
                 )
             }
-        }
-        return results
-    }
-
-    private func searchPlugins(query: String) -> [SearchItem] {
-        let pluginItems = pluginHost.queryAll(query: query)
-        var results: [SearchItem] = []
-
-        for pItem in pluginItems {
-            results.append(
-                SearchItem(
-                    id: "\(pItem.pluginId):\(pItem.id)",
-                    title: pItem.title,
-                    subtitle: pItem.subtitle,
-                    category: .plugin,
-                    score: pItem.scoreBoost + 100,
-                    actionPayload: pItem.actionPayload,
-                    previewDetail: "\(pItem.title)\n\(pItem.subtitle)",
-                    action: { [weak self] in
-                        self?.pluginHost.executeItem(pluginId: pItem.pluginId, itemId: pItem.id, actionPayload: pItem.actionPayload) ?? false
-                    }
-                )
-            )
         }
         return results
     }
