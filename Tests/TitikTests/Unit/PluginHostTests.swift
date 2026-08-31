@@ -9,7 +9,8 @@ struct PluginHostTests {
         let host = PluginHost()
         defer { host.shutdownAll() }
 
-        let success = host.loadPlugin(at: "/tmp/non_existent_plugin_12345.titikplugin")
+        let nonExistentPath = FileManager.default.temporaryDirectory.appendingPathComponent("non_existent_plugin_\(UUID().uuidString).titikplugin").path
+        let success = host.loadPlugin(at: nonExistentPath)
         #expect(!success)
     }
 

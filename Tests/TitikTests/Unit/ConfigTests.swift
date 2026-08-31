@@ -62,7 +62,7 @@ struct ConfigTests {
     @Test("Default config fallback")
     func testDefaultConfigFallback() {
         let loader = ConfigLoader()
-        let nonExistentURL = URL(fileURLWithPath: "/tmp/non_existent_config_12345.json")
+        let nonExistentURL = FileManager.default.temporaryDirectory.appendingPathComponent("non_existent_config_\(UUID().uuidString).json")
         let cfg = loader.load(from: nonExistentURL)
         #expect(cfg.window.width == 720)
         #expect(cfg.hotkey.modifier == "cmd")

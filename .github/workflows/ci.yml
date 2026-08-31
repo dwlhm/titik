@@ -20,11 +20,13 @@ jobs:
           swift --version
           xcodebuild -version
 
-      - name: Build Plugins
-        run: make plugins
+      - name: Cache Swift PM Build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
 
-      - name: Run Test Suite
-        run: make test
-
-      - name: Build Application Bundle
-        run: make bundle
+      - name: Verify Build & Test Suite
+        run: make verify

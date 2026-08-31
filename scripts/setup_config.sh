@@ -33,6 +33,13 @@ fi
 # Ensure log directory is writable
 touch "${STATE_DIR}/titik.log"
 
+# Configure Git hooks if inside a git repository
+if [ -d "${PROJECT_ROOT}/.git" ] || git -C "${PROJECT_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "==> Configuring Git hooks..."
+    git -C "${PROJECT_ROOT}" config core.hooksPath .githooks
+    chmod +x "${PROJECT_ROOT}/.githooks/"* 2>/dev/null || true
+fi
+
 echo "==> Titik environment setup complete."
 echo "    Config:  ${TARGET_CONFIG}"
 echo "    Plugins: ${PLUGINS_DIR}"

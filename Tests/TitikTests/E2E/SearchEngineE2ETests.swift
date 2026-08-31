@@ -26,11 +26,20 @@ struct SearchEngineE2ETests {
     }
 
     @Test("Path search returns directory items with rich preview enabled")
-    func testPathSearchReturnsDirectoryItems() {
-        let items = searchEngine.search(query: "~")
-        #expect(!items.isEmpty, "Path search on ~ should return directory contents")
+    func testPathSearchReturnsDirectoryItems() throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        let sampleFile = tempDir.appendingPathComponent("sample.txt")
+        try "test content".write(to: sampleFile, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
 
-        let firstItem = items.first!
+        let items = searchEngine.search(query: tempDir.path)
+        #expect(!items.isEmpty, "Path search on temp directory should return directory contents")
+
+        guard let firstItem = items.first else {
+            #expect(Bool(false), "Expected at least one item")
+            return
+        }
         #expect(firstItem.category == .directory || firstItem.category == .file)
         #expect(firstItem.hasRichPreview == true)
         #expect(firstItem.previewURL != nil)
@@ -40,7 +49,9 @@ struct SearchEngineE2ETests {
     func testFileCommandPrefixSearch() {
         let items = searchEngine.search(query: "file:~")
         #expect(!items.isEmpty)
-        #expect(items.first?.category == .directory || items.first?.category == .file)
+        if let first = items.first {
+            #expect(first.category == .directory || first.category == .file)
+        }
     }
 
     @Test("Math query evaluation")
@@ -48,7 +59,10 @@ struct SearchEngineE2ETests {
         let items = searchEngine.search(query: "25 * 4")
         #expect(!items.isEmpty)
 
-        let topItem = items.first!
+        guard let topItem = items.first else {
+            #expect(Bool(false), "Expected math result item")
+            return
+        }
         #expect(topItem.category == .calculator)
         #expect(topItem.title == "100")
         #expect(topItem.hasRichPreview == false)

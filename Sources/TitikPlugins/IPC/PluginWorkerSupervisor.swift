@@ -107,11 +107,33 @@ public final class PluginWorkerSupervisor: @unchecked Sendable {
         let proc = Process()
         proc.executableURL = workerURL
         var env = ProcessInfo.processInfo.environment
+        let developerDir: String = {
+            if let envDevDir = env["DEVELOPER_DIR"], !envDevDir.isEmpty, FileManager.default.fileExists(atPath: envDevDir) {
+                return envDevDir
+            }
+            if FileManager.default.fileExists(atPath: "/Library/Developer/CommandLineTools") {
+                return "/Library/Developer/CommandLineTools"
+            }
+            if FileManager.default.fileExists(atPath: "/Applications/Xcode.app/Contents/Developer") {
+                return "/Applications/Xcode.app/Contents/Developer"
+            }
+            return "/Library/Developer/CommandLineTools"
+        }()
         if env["DYLD_LIBRARY_PATH"] == nil {
-            env["DYLD_LIBRARY_PATH"] = "/Library/Developer/CommandLineTools/Library/Developer/usr/lib"
+            let libPath = "\(developerDir)/Library/Developer/usr/lib"
+            if FileManager.default.fileExists(atPath: libPath) {
+                env["DYLD_LIBRARY_PATH"] = libPath
+            } else if FileManager.default.fileExists(atPath: "\(developerDir)/usr/lib") {
+                env["DYLD_LIBRARY_PATH"] = "\(developerDir)/usr/lib"
+            }
         }
         if env["DYLD_FRAMEWORK_PATH"] == nil {
-            env["DYLD_FRAMEWORK_PATH"] = "/Library/Developer/CommandLineTools/Library/Developer/Frameworks"
+            let frameworkPath = "\(developerDir)/Library/Developer/Frameworks"
+            if FileManager.default.fileExists(atPath: frameworkPath) {
+                env["DYLD_FRAMEWORK_PATH"] = frameworkPath
+            } else if FileManager.default.fileExists(atPath: "\(developerDir)/Library/Frameworks") {
+                env["DYLD_FRAMEWORK_PATH"] = "\(developerDir)/Library/Frameworks"
+            }
         }
         proc.environment = env
 
