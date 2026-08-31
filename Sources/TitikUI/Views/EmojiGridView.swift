@@ -137,6 +137,10 @@ public final class EmojiPlugin: ObservableObject, PluginUIRepresentable {
         }
     }
 
+    public func submitQuery() {
+        executeSelected()
+    }
+
     public func handleAction(actionId: String, payload: String) -> Bool {
         if actionId == "select", let item = items.first(where: { $0.emoji == payload }) {
             if let onSelect = onSelectEmoji {

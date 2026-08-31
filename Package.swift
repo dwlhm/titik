@@ -8,6 +8,7 @@ let package = Package(
     ],
     products: [
         .executable(name: "titik", targets: ["Titik"]),
+        .executable(name: "titik-worker", targets: ["TitikWorker"]),
         .library(name: "TitikCore", targets: ["TitikCore"]),
         .library(name: "TitikKeymap", targets: ["TitikKeymap"]),
         .library(name: "TitikParser", targets: ["TitikParser"]),
@@ -40,8 +41,7 @@ let package = Package(
         ),
         .target(
             name: "TitikPlugins",
-            dependencies: ["TitikCore", "TitikPluginKit"],
-            exclude: ["include"]
+            dependencies: ["TitikCore", "TitikPluginKit"]
         ),
         .target(
             name: "TitikSearch",
@@ -54,6 +54,17 @@ let package = Package(
         .executableTarget(
             name: "Titik",
             dependencies: ["TitikCore", "TitikPlatform", "TitikKeymap", "TitikSearch", "TitikPlugins", "TitikUI", "TitikPluginKit"]
+        ),
+        .executableTarget(
+            name: "TitikWorker",
+            dependencies: ["TitikCore", "TitikPluginKit", "TitikPlugins"],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+                    "-Xlinker", "-rpath", "-Xlinker", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+                    "-Xlinker", "-rpath", "-Xlinker", "/Library/Developer/CommandLineTools/Library/Developer/usr/lib"
+                ])
+            ]
         ),
         .testTarget(
             name: "TitikTests",

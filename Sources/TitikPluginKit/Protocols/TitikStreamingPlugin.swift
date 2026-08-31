@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-public enum StreamEvent: Sendable, Equatable {
+public enum StreamEvent: Sendable, Equatable, Codable {
     case textDelta(String)
     case media(MediaAsset)
     case citation(CitationSource)

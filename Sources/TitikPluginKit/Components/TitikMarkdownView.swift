@@ -327,7 +327,7 @@ public struct TitikMarkdownView: View {
         self.isStreaming = isStreaming
     }
 
-    static func sanitizeStreamingTail(_ text: String) -> String {
+    nonisolated static func sanitizeStreamingTail(_ text: String) -> String {
         var result = text
 
         // Remove the last unclosed ** bold marker

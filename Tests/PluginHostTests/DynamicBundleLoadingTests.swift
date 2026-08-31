@@ -80,7 +80,7 @@ struct DynamicBundleLoadingTests {
 
         let matched = host.findActivePlugin(forQuery: "!mock hello world")
         #expect(matched != nil)
-        #expect(matched?.descriptor.id == "mock.test.plugin")
+        #expect(matched?.manifest.id == "mock.test.plugin")
         #expect(matched?.subquery == "hello world")
     }
 

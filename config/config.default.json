@@ -45,5 +45,9 @@
     "max_clipboard_history": 100,
     "show_preview_pane": true,
     "excluded_apps": []
+  },
+  "plugins": {
+    "titik.system.plugin": true,
+    "titik.builtin.emoji": true
   }
 }

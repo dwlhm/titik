@@ -1,63 +1,64 @@
 import Foundation
 import Testing
 import TitikPlugins
+import TitikPluginKit
+
+private final class MockE2EPlugin: TitikStreamingPlugin, @unchecked Sendable {
+    static let id = "titik.plugin.test"
+    static let name = "test"
+    static let version = "1.0.0"
+    static let sdkVersion = 2
+
+    let context: PluginContext
+    init(context: PluginContext) {
+        self.context = context
+    }
+    func onQuery(_ query: String) async throws -> PluginCanvas {
+        return .list([
+            PluginItem(
+                id: "item1",
+                title: "Test Item",
+                subtitle: "Sub",
+                category: "Test",
+                actionPayload: "action"
+            )
+        ])
+    }
+}
 
 @Suite("PluginLifecycle E2E Tests")
 struct PluginLifecycleE2ETests {
-    @Test("Dynamic plugin full lifecycle")
-    func testDynamicPluginFullLifecycle() {
+    @Test("Native plugin full lifecycle")
+    func testDynamicPluginFullLifecycle() async throws {
         let host = PluginHost()
         defer { host.shutdownAll() }
 
-        let pluginPath = "plugins/math_plugin/math.dylib"
-        guard FileManager.default.fileExists(atPath: pluginPath) else {
-            return
-        }
+        #expect(host.loadedManifests().isEmpty)
 
-        // 1. Load plugin & inspect metadata
-        let loaded = host.loadPlugin(at: pluginPath)
-        #expect(loaded, "Plugin should load successfully")
-        let loadedPlugins = host.loadedPlugins()
-        #expect(!loadedPlugins.isEmpty)
-        let mathDescriptor = loadedPlugins.first { $0.id == "titik.plugin.math" }
-        #expect(mathDescriptor != nil)
-        #expect(mathDescriptor?.name == "math")
-        #expect(mathDescriptor?.shortBang == "calc")
+        let manifest = PluginManifest(
+            id: "titik.plugin.test",
+            name: "test",
+            version: "1.0.0",
+            sdkVersion: 2,
+            description: "Test plugin",
+            entrypoint: "MockE2EPlugin",
+            triggers: ["!test", "!t"]
+        )
+        let context = PluginContext(pluginId: manifest.id)
+        let plugin = MockE2EPlugin(context: context)
+        host.registerNativePlugin(plugin, manifest: manifest)
 
-        // 2. Test findActivePlugin
-        let activeShort = host.findActivePlugin(forQuery: "!calc 12 * 12")
+        let loaded = host.loadedManifests()
+        #expect(loaded.count == 1)
+        #expect(loaded.first?.id == "titik.plugin.test")
+
+        let activeShort = host.findActivePlugin(forQuery: "!t query")
         #expect(activeShort != nil)
-        #expect(activeShort?.descriptor.id == "titik.plugin.math")
-        #expect(activeShort?.subquery == "12 * 12")
+        #expect(activeShort?.manifest.id == "titik.plugin.test")
+        #expect(activeShort?.subquery == "query")
 
-        let activeName = host.findActivePlugin(forQuery: "!math 12 * 12")
-        #expect(activeName != nil)
-        #expect(activeName?.descriptor.id == "titik.plugin.math")
-        #expect(activeName?.subquery == "12 * 12")
-
-        let exactBang = host.findActivePlugin(forQuery: "!calc")
-        #expect(exactBang != nil)
-        #expect(exactBang?.subquery == "")
-
-        let noBang = host.findActivePlugin(forQuery: "calc 12 * 12")
-        #expect(noBang == nil)
-
-        // 3. Query plugin via queryPlugin
-        let pluginItems = host.queryPlugin(id: "titik.plugin.math", subquery: "12 * 12")
-        #expect(!pluginItems.isEmpty)
-        let result = pluginItems.first!
-        #expect(result.title == "144")
-        #expect(result.scoreBoost > 0)
-
-        // 4. Execute item action
-        let executed = host.executeItem(pluginId: result.pluginId, itemId: result.id, actionPayload: result.actionPayload)
-        #expect(executed, "Item execution should succeed")
-
-        // 5. Hot reload check
-        host.checkAndReloadModifiedPlugins()
-
-        // 6. Unload plugin
-        host.unloadPlugin(id: result.pluginId)
-        #expect(host.loadedPlugins().isEmpty)
+        host.unloadPlugin(id: "titik.plugin.test")
+        #expect(host.loadedManifests().isEmpty)
     }
 }
+

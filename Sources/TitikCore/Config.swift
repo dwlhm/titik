@@ -246,6 +246,53 @@ public struct BehaviorsConfig: Codable, Equatable, Sendable {
     }
 }
 
+/// Plugin whitelist configuration.
+/// Only plugin IDs explicitly listed here are ever loaded by the runtime.
+/// absent → never loaded. true → enabled. false → disabled.
+public struct PluginsConfig: Codable, Equatable, Sendable {
+    public static let defaultRegistrations: [String: Bool] = [
+        "titik.system.plugin": true,
+        "titik.builtin.emoji": true
+    ]
+
+    /// Maps plugin reverse-DNS ID to its enabled state.
+    public var registrations: [String: Bool]
+
+    enum CodingKeys: String, CodingKey {
+        case registrations = "plugins"
+    }
+
+    public init(registrations: [String: Bool] = Self.defaultRegistrations) {
+        self.registrations = registrations
+    }
+
+    public init(from decoder: Decoder) throws {
+        var rawDict: [String: Bool]? = nil
+        if let container = try? decoder.container(keyedBy: CodingKeys.self),
+           let dict = try? container.decodeIfPresent([String: Bool].self, forKey: .registrations) {
+            rawDict = dict
+        } else if let single = try? decoder.singleValueContainer(),
+                  let dict = try? single.decode([String: Bool].self) {
+            rawDict = dict
+        }
+
+        if let decoded = rawDict {
+            var merged = Self.defaultRegistrations
+            for (k, v) in decoded {
+                merged[k] = v
+            }
+            self.registrations = merged
+        } else {
+            self.registrations = Self.defaultRegistrations
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(registrations)
+    }
+}
+
 public struct Config: Codable, Equatable, Sendable {
     public var window: WindowConfig
     public var animation: AnimationConfig
@@ -253,6 +300,7 @@ public struct Config: Codable, Equatable, Sendable {
     public var theme: ThemeConfig
     public var layout: LayoutConfig
     public var behaviors: BehaviorsConfig
+    public var plugins: PluginsConfig
 
     enum CodingKeys: String, CodingKey {
         case window
@@ -261,6 +309,7 @@ public struct Config: Codable, Equatable, Sendable {
         case theme
         case layout
         case behaviors
+        case plugins
     }
 
     public init(
@@ -269,7 +318,8 @@ public struct Config: Codable, Equatable, Sendable {
         hotkey: HotkeyConfig = HotkeyConfig(),
         theme: ThemeConfig = ThemeConfig(),
         layout: LayoutConfig = LayoutConfig(),
-        behaviors: BehaviorsConfig = BehaviorsConfig()
+        behaviors: BehaviorsConfig = BehaviorsConfig(),
+        plugins: PluginsConfig = PluginsConfig()
     ) {
         self.window = window
         self.animation = animation
@@ -277,6 +327,7 @@ public struct Config: Codable, Equatable, Sendable {
         self.theme = theme
         self.layout = layout
         self.behaviors = behaviors
+        self.plugins = plugins
     }
 
     public init(from decoder: Decoder) throws {
@@ -287,5 +338,7 @@ public struct Config: Codable, Equatable, Sendable {
         self.theme = try container.decodeIfPresent(ThemeConfig.self, forKey: .theme) ?? ThemeConfig()
         self.layout = try container.decodeIfPresent(LayoutConfig.self, forKey: .layout) ?? LayoutConfig()
         self.behaviors = try container.decodeIfPresent(BehaviorsConfig.self, forKey: .behaviors) ?? BehaviorsConfig()
+        self.plugins = try container.decodeIfPresent(PluginsConfig.self, forKey: .plugins) ?? PluginsConfig()
     }
 }
+

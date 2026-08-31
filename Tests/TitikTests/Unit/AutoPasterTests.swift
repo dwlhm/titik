@@ -77,4 +77,23 @@ struct AutoPasterTests {
         #expect(orchestrator.query.isEmpty)
         #expect(NSPasteboard.general.string(forType: .string) == "😁")
     }
+
+    @Test("UIOrchestrator executeSelected when emoji plugin active triggers submitQuery and AutoPaster toast")
+    func testExecuteSelectedInEmojiPluginTriggersAutoPaster() {
+        let originalChecker = AutoPaster.shared.accessibilityChecker
+        defer { AutoPaster.shared.accessibilityChecker = originalChecker }
+
+        AutoPaster.shared.accessibilityChecker = { false }
+        ToastManager.shared.dismiss()
+
+        let orchestrator = UIOrchestrator()
+        orchestrator.performSearch("!emoji smile")
+
+        #expect(orchestrator.activePluginUI != nil)
+
+        orchestrator.executeSelected()
+
+        #expect(ToastManager.shared.currentToast != nil)
+        #expect(ToastManager.shared.currentToast?.icon == "doc.on.clipboard")
+    }
 }
