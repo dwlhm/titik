@@ -28,6 +28,7 @@ run: build
 
 test:
 	@echo "==> Running Swift test suite..."
+	@mkdir -p .build/clang-cache .build/tmp
 	@$(SWIFT_ENV) swift test --disable-sandbox $(SWIFT_TEST_FLAGS)
 
 plugins:
