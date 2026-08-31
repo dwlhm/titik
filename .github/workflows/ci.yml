@@ -20,7 +20,7 @@ jobs:
           swift --version
           xcodebuild -version
 
-      - name: Build Dynamic Plugins
+      - name: Build Plugins
         run: make plugins
 
       - name: Run Test Suite

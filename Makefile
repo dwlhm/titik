@@ -30,8 +30,11 @@ test:
 	@echo "==> Running Swift test suite..."
 	@$(SWIFT_ENV) swift test --disable-sandbox $(SWIFT_TEST_FLAGS)
 
+plugins:
+	@echo "==> Native Swift plugins are built with 'make build'"
+
 clean:
 	@rm -rf bin .build
 	@echo "==> Clean complete."
 
-.PHONY: all setup build bundle install run clean test
+.PHONY: all setup build bundle install run clean test plugins

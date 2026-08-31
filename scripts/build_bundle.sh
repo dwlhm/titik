@@ -25,12 +25,13 @@ fi
 cp "${BIN_DIR}/titik" "${MACOS}/titik"
 chmod +x "${MACOS}/titik"
 
-if [ -f "${PROJECT_ROOT}/config/config.default.json" ]; then
-    cp "${PROJECT_ROOT}/config/config.default.json" "${RESOURCES}/config.default.json"
+if [ -f "${BIN_DIR}/titik-worker" ]; then
+    cp "${BIN_DIR}/titik-worker" "${MACOS}/titik-worker"
+    chmod +x "${MACOS}/titik-worker"
 fi
 
-if [ -f "${PROJECT_ROOT}/plugins/math_plugin/math.dylib" ]; then
-    cp "${PROJECT_ROOT}/plugins/math_plugin/math.dylib" "${PLUGINS}/math.dylib"
+if [ -f "${PROJECT_ROOT}/config/config.default.json" ]; then
+    cp "${PROJECT_ROOT}/config/config.default.json" "${RESOURCES}/config.default.json"
 fi
 
 cat > "${CONTENTS}/Info.plist" << 'EOF'
