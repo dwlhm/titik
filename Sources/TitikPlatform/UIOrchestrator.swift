@@ -7,6 +7,7 @@ import TitikSearch
 import TitikPlugins
 import TitikParser
 import TitikPluginKit
+import AskAIPlugin
 
 @MainActor
 public final class UIOrchestrator: ObservableObject {
@@ -92,6 +93,25 @@ public final class UIOrchestrator: ObservableObject {
                 self.activeSession = nil
             }
         }
+
+        // 1. Check if query matches a native streaming plugin (like AskAIPlugin) via PluginHost
+        if (q.contains(" ") || q.hasSuffix(" ")),
+           let match = PluginHost.shared.findActivePlugin(forQuery: q),
+           let loaded = PluginHost.shared.getLoadedNativePlugin(id: match.descriptor.id),
+           let streamingPlugin = loaded.plugin as? (any TitikStreamingPlugin) {
+            let adapter: AskAIPluginUIAdapter
+            if let existing = self.activePluginUI as? AskAIPluginUIAdapter, existing.pluginId == match.descriptor.id {
+                adapter = existing
+            } else {
+                adapter = AskAIPluginUIAdapter(pluginId: match.descriptor.id, plugin: streamingPlugin)
+            }
+            adapter.handleSearchQuery(match.subquery.isEmpty ? q : match.subquery)
+            self.activePluginUI = adapter
+            self.results = []
+            self.selectedIndex = 0
+            return
+        }
+
 
         let ast = commandParser.parse(q)
 

@@ -15,7 +15,8 @@ let package = Package(
         .library(name: "TitikPlugins", targets: ["TitikPlugins"]),
         .library(name: "TitikUI", targets: ["TitikUI"]),
         .library(name: "TitikSearch", targets: ["TitikSearch"]),
-        .library(name: "TitikPlatform", targets: ["TitikPlatform"])
+        .library(name: "TitikPlatform", targets: ["TitikPlatform"]),
+        .library(name: "AskAIPlugin", targets: ["AskAIPlugin"])
     ],
     targets: [
         .target(
@@ -49,11 +50,11 @@ let package = Package(
         ),
         .target(
             name: "TitikPlatform",
-            dependencies: ["TitikCore", "TitikKeymap", "TitikUI", "TitikSearch", "TitikPlugins", "TitikParser", "TitikPluginKit"]
+            dependencies: ["TitikCore", "TitikKeymap", "TitikUI", "TitikSearch", "TitikPlugins", "TitikParser", "TitikPluginKit", "AskAIPlugin"]
         ),
         .executableTarget(
             name: "Titik",
-            dependencies: ["TitikCore", "TitikPlatform", "TitikKeymap", "TitikSearch", "TitikPlugins", "TitikUI", "TitikPluginKit"]
+            dependencies: ["TitikCore", "TitikPlatform", "TitikKeymap", "TitikSearch", "TitikPlugins", "TitikUI", "TitikPluginKit", "AskAIPlugin"]
         ),
         .testTarget(
             name: "TitikTests",
@@ -123,6 +124,16 @@ let package = Package(
                 ])
             ]
         ),
+        .target(
+            name: "AskAIPlugin",
+            dependencies: [
+                "TitikCore",
+                "TitikKeymap",
+                "TitikUI",
+                "TitikPluginKit"
+            ],
+            path: "plugins/ask_ai/Sources"
+        ),
         .testTarget(
             name: "TitikE2ETests",
             dependencies: [
@@ -135,6 +146,30 @@ let package = Package(
                 "TitikPlugins",
                 "TitikPlatform"
             ],
+            swiftSettings: [
+                .unsafeFlags(["-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks"])
+            ],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+                    "-framework", "Testing",
+                    "-Xlinker", "-rpath", "-Xlinker", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+                    "-Xlinker", "-rpath", "-Xlinker", "/Library/Developer/CommandLineTools/Library/Developer/usr/lib"
+                ])
+            ]
+        ),
+        .testTarget(
+            name: "AskAITests",
+            dependencies: [
+                "TitikCore",
+                "TitikKeymap",
+                "TitikUI",
+                "TitikPluginKit",
+                "TitikPlugins",
+                "TitikPlatform",
+                "AskAIPlugin"
+            ],
+            path: "Tests/AskAITests",
             swiftSettings: [
                 .unsafeFlags(["-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks"])
             ],

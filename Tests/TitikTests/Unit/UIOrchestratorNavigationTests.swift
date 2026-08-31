@@ -5,6 +5,7 @@ import TitikPlatform
 import TitikPlugins
 import TitikSearch
 import TitikPluginKit
+import AskAIPlugin
 
 @Suite("UIOrchestrator Navigation Tests")
 @MainActor
@@ -368,6 +369,51 @@ struct UIOrchestratorNavigationTests {
         #expect(orchestrator.query == "!file ")
     }
 
+    private func registerAskAIPluginIfNeeded() {
+        let host = PluginHost.shared
+        if host.getLoadedNativePlugin(id: AskAIPlugin.id) == nil {
+            let manifest = PluginManifest(
+                id: AskAIPlugin.id,
+                name: AskAIPlugin.name,
+                version: AskAIPlugin.version,
+                sdkVersion: 2,
+                description: "Flagship AI Assistant",
+                entrypoint: "AskAIPlugin",
+                triggers: ["ask", "ai"]
+            )
+            let plugin = AskAIPlugin(context: PluginContext(pluginId: manifest.id))
+            host.registerNativePlugin(plugin, manifest: manifest)
+        }
+    }
+
+    @Test("AskAI plugin trigger recognition for !ask and !ai in UIOrchestrator")
+    func testAskAITriggerRecognitionInUIOrchestrator() {
+        registerAskAIPluginIfNeeded()
+        let orchestrator = UIOrchestrator()
+
+        // 1. Test !ask with trailing space
+        orchestrator.performSearch("!ask What is Titik?")
+        #expect(orchestrator.activePluginUI != nil)
+        #expect(orchestrator.results.isEmpty)
+        #expect(orchestrator.selectedIndex == 0)
+
+        // 2. Test !ai with trailing space
+        orchestrator.performSearch("!ai Explain swift concurrency")
+        #expect(orchestrator.activePluginUI != nil)
+        #expect(orchestrator.results.isEmpty)
+        #expect(orchestrator.selectedIndex == 0)
+
+        // 3. Test uncommitted query without space does not mount plugin UI
+        orchestrator.performSearch("!ask")
+        #expect(orchestrator.activePluginUI == nil)
+        #expect(!orchestrator.results.isEmpty)
+
+        // 4. Test clearing / non-AI query restores normal results
+        orchestrator.performSearch("Terminal")
+        #expect(orchestrator.activePluginUI == nil)
+        #expect(!orchestrator.results.isEmpty)
+    }
+
     @Test("MathPlugin clean identifier bang activation with space")
     func test_mathPlugin_cleanIdentifier_bangActivationWithSpace() {
         let host = PluginHost.shared
@@ -381,6 +427,54 @@ struct UIOrchestratorNavigationTests {
         let resultsMath = engine.search(query: "!math 20 + 30")
         #expect(!resultsMath.isEmpty)
         #expect(resultsMath.first?.title == "50")
+    }
+
+    @Test("AskAI plugin clean identifier bang activation with space")
+    func test_askAIPlugin_cleanIdentifier_bangActivationWithSpace() {
+        registerAskAIPluginIfNeeded()
+        let orchestrator = UIOrchestrator()
+
+        orchestrator.performSearch("!ask What is Titik?")
+        #expect(orchestrator.activePluginUI != nil)
+        #expect(orchestrator.results.isEmpty)
+
+        orchestrator.performSearch("!ai ")
+        #expect(orchestrator.activePluginUI != nil)
+        #expect(orchestrator.results.isEmpty)
+
+        orchestrator.performSearch("!ask")
+        #expect(orchestrator.activePluginUI == nil)
+    }
+
+    @Test("Uncommitted bang displays suggestion row in list")
+    func test_uncommittedBang_displaysSuggestionRowInList() {
+        registerAskAIPluginIfNeeded()
+        _ = PluginHost.shared.loadPlugin(at: "plugins/math_plugin/math.dylib")
+        let orchestrator = UIOrchestrator()
+
+        orchestrator.performSearch("!ask")
+        #expect(orchestrator.activePluginUI == nil)
+        #expect(!orchestrator.results.isEmpty)
+        #expect(orchestrator.results.contains { $0.title.hasPrefix("!ask") })
+
+        orchestrator.performSearch("!calc")
+        #expect(orchestrator.activePluginUI == nil)
+        #expect(!orchestrator.results.isEmpty)
+        #expect(orchestrator.results.contains { $0.title.hasPrefix("!calc") })
+    }
+
+    @Test("Pressing Tab or Return appends space and mounts plugin")
+    func test_pressingTabOrReturn_appendsSpaceAndMountsPlugin() {
+        registerAskAIPluginIfNeeded()
+        let orchestrator = UIOrchestrator()
+
+        orchestrator.performSearch("!ask")
+        #expect(orchestrator.activePluginUI == nil)
+        #expect(!orchestrator.results.isEmpty)
+
+        orchestrator.executeSelected()
+        #expect(orchestrator.query == "!ask ")
+        #expect(orchestrator.activePluginUI != nil)
     }
 }
 

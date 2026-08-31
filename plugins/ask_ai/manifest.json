@@ -1,0 +1,24 @@
+{
+  "id": "com.titik.plugin.ask_ai",
+  "name": "Ask AI",
+  "version": "1.1.0",
+  "sdkVersion": 2,
+  "description": "Flagship native AI assistant plugin with official OpenCode and Google Antigravity backends.",
+  "entrypoint": "AskAIPlugin",
+  "triggers": [
+    "ask",
+    "ai"
+  ],
+  "permissions": [
+    "requiresNetwork: true",
+    "requiresKeychain: [\"OPENCODE_API_KEY\", \"ANTIGRAVITY_TOKEN\"]"
+  ],
+  "preferences": {
+    "webSearchEnabled": true,
+    "defaultProvider": "opencode",
+    "fallbackProvider": "google-antigravity",
+    "opencodeEndpoint": "https://opencode.ai/zen/go/v1",
+    "opencodeModel": "glm-5.3-flash",
+    "antigravityEndpoint": "https://antigravity.google.com/v1"
+  }
+}

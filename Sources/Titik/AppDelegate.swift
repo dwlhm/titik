@@ -8,6 +8,7 @@ import TitikSearch
 import TitikPlatform
 import TitikPlugins
 import TitikPluginKit
+import AskAIPlugin
 
 @MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -33,6 +34,26 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 5. Load plugins
         PluginHost.shared.loadAll()
+
+        // Register built-in AskAIPlugin
+        let manifest: PluginManifest
+        let manifestURL = URL(fileURLWithPath: "plugins/ask_ai/manifest.json")
+        if let data = try? Data(contentsOf: manifestURL),
+           let parsed = try? PluginManifest.validate(jsonData: data) {
+            manifest = parsed
+        } else {
+            manifest = PluginManifest(
+                id: "com.titik.plugin.ask_ai",
+                name: "Ask AI",
+                version: "1.0.0",
+                sdkVersion: 2,
+                description: "Flagship native AI assistant plugin with official OpenCode and Google Antigravity backends.",
+                entrypoint: "AskAIPlugin",
+                triggers: ["ask", "ai"]
+            )
+        }
+        let askAIPlugin = AskAIPlugin(context: PluginContext(pluginId: manifest.id))
+        PluginHost.shared.registerNativePlugin(askAIPlugin, manifest: manifest)
 
         // 6. Setup main window
         let contentView = AnyView(MainContentView(orchestrator: UIOrchestrator.shared))
