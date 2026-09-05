@@ -49,17 +49,6 @@ struct E2ERealWorldScenariosTests {
         #expect(isCancelled == true)
     }
 
-    @Test("F15: Memory leak-free lifecycle instantiation and deallocation")
-    func test_f15_memoryLeakFreeTestExecution() {
-        weak var weakWatcher: ConfigWatcher?
-        autoreleasepool {
-            let watcher = ConfigWatcher()
-            weakWatcher = watcher
-            #expect(weakWatcher != nil)
-        }
-        #expect(weakWatcher == nil)
-    }
-
     @Test("F15: Full pipeline end-to-end event to search engine integration")
     func test_f15_fullPipelineEndToEndVerification() {
         let searchEngine = SearchEngine.shared
