@@ -28,4 +28,12 @@ public enum CommandAST: Equatable, Sendable {
     case command(name: String, args: [String], flags: [String: String])
     case bangSuggestion(prefix: String)
     case raw(query: String)
+    case pluginInvocation(
+        trigger: String,
+        action: String?,
+        primaryValue: String,
+        flags: [String: String],
+        booleanFlags: Set<String>,
+        rawTail: String
+    )
 }
