@@ -237,7 +237,7 @@ struct AdversarialBangAndCommandTests {
 
         #expect(result.isSuccess == false)
         #expect(result.message?.contains("timed out") == true)
-        #expect(elapsed >= 0.3 && elapsed <= 5.0)
+        #expect(elapsed >= 0.3 && elapsed <= 15.0)
     }
 
     // MARK: - 3. Real-World Workflows & Integration

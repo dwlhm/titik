@@ -77,7 +77,7 @@ struct ConfigWatcherTests {
         try updatedJSON.write(to: configURL, atomically: false, encoding: .utf8)
 
         let satisfied = await waitForCondition(timeoutSeconds: 3.0) {
-            expectation.get() != nil
+            expectation.get()?.window.width == 880
         }
         #expect(satisfied)
 
@@ -126,7 +126,7 @@ struct ConfigWatcherTests {
         try atomicJSON.write(to: configURL, atomically: true, encoding: .utf8)
 
         let satisfied = await waitForCondition(timeoutSeconds: 3.0) {
-            expectation.get() != nil
+            expectation.get()?.window.width == 920
         }
         #expect(satisfied)
 
@@ -164,7 +164,7 @@ struct ConfigWatcherTests {
         watcher.triggerReload()
 
         let satisfied = await waitForCondition(timeoutSeconds: 3.0) {
-            expectation.get() != nil
+            expectation.get()?.window.width == 777
         }
         #expect(satisfied)
 
