@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+COMMIT_MSG_FILE="$1"
+
+if [ ! -f "$COMMIT_MSG_FILE" ]; then
+    echo "Error: Commit message file '$COMMIT_MSG_FILE' not found." >&2
+    exit 1
+fi
+
+# Extract the first non-empty, non-comment line
+SUBJECT=$(grep -v '^[[:space:]]*#' "$COMMIT_MSG_FILE" | grep -v '^[[:space:]]*$' | head -n 1 || true)
+
+if [ -z "$SUBJECT" ]; then
+    echo "Error: Commit message cannot be empty." >&2
+    exit 1
+fi
+
+# Allow merge commits
+if [[ "$SUBJECT" =~ ^Merge[[:space:]] ]]; then
+    exit 0
+fi
+
+# Allow revert commits
+if [[ "$SUBJECT" =~ ^(revert|Revert):?[[:space:]] ]] || [[ "$SUBJECT" =~ ^Revert[[:space:]]\" ]]; then
+    exit 0
+fi
+
+# Conventional Commits regex
+CONVENTIONAL_REGEX='^(feat|fix|refactor|test|docs|chore|perf|style|ci|build)(\([a-zA-Z0-9_\.-]+\))?: .+'
+
+if ! [[ "$SUBJECT" =~ $CONVENTIONAL_REGEX ]]; then
+    echo "================================================================================" >&2
+    echo "COMMIT REJECTED: Invalid commit message format." >&2
+    echo "================================================================================" >&2
+    echo "Your commit message:" >&2
+    echo "  $SUBJECT" >&2
+    echo "" >&2
+    echo "Commit messages must follow the Conventional Commits specification:" >&2
+    echo "  <type>(<optional scope>): <description>" >&2
+    echo "" >&2
+    echo "Allowed types:" >&2
+    echo "  feat, fix, refactor, test, docs, chore, perf, style, ci, build" >&2
+    echo "" >&2
+    echo "Examples:" >&2
+    echo "  feat(keymap): support dynamic hotkey re-registration" >&2
+    echo "  fix: resolve race condition in ConfigWatcher" >&2
+    echo "  chore: update swift-format configuration" >&2
+    echo "================================================================================" >&2
+    exit 1
+fi
+
+exit 0

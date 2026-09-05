@@ -103,6 +103,88 @@ Configures interaction behaviors and integration settings.
 
 ---
 
+### 7. `plugins`
+
+Controls enabling or disabling built-in and dynamic native plugins.
+
+| Plugin ID | Canonical Bang | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `titik.system.plugin` | `!plugin` | Plugin management and live reload | `true` |
+| `titik.builtin.app` | `!app` | Application searching and launching | `true` |
+| `titik.builtin.file` | `!file` | File searching and filesystem browsing | `true` |
+| `titik.builtin.clipboard` | `!clip` | Clipboard history search and restore | `true` |
+| `titik.builtin.system` | `!cmd` | macOS system commands (Lock, Sleep, Restart, etc.) | `true` |
+| `titik.builtin.calculator` | `!calc` | Math expression evaluation and functions | `true` |
+| `titik.builtin.emoji` | `!emoji` | Emoji catalog and clipboard copy | `true` |
+| `titik.builtin.zen` | `!zen` | Zen Browser tab and workspace manager | `true` |
+| `titik.builtin.launcher` | `!open` | Application launcher and IDE project opener | `true` |
+| `titik.builtin.shortcuts` | `!keys` | Global hotkeys inspector and conflict analyzer | `true` |
+
+---
+
+### 8. `shortcuts`
+
+Configures custom global keyboard shortcuts for direct invocation of plugins, commands, applications, or URLs.
+
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | String | Auto-generated | Unique identifier for the shortcut binding. |
+| `name` | String | Optional | Descriptive label for display in the hotkeys inspector. |
+| `key` / `keys` / `shortcut` | String | Required | Target key (`"k"`, `"space"`, etc.) or combination (`"cmd+shift+k"`, `"opt+space"`). |
+| `modifiers` | Array | `[]` | Modifier keys (`["cmd"]`, `["opt", "shift"]`). Optional if combo specified in `key`/`keys`. |
+| `mode` | String | `"background"` | Execution mode: `"background"` (`"silent"`) or `"palette"` (`"hud"`). |
+| `action` | Object / String | Required | Action payload or shorthand command/URL string (e.g. `"!zen"`, `"https://apple.com"`). |
+
+#### Action Object Properties
+
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `type` | String | Inferred | Action type (`"raw_query"`, `"quick_link"`, `"app_launch"`, `"plugin_command"`, `"toggle_window"`, `"system_command"`). Inferred as `"quick_link"` for URLs, otherwise `"raw_query"`. |
+| `target` | String | Required | Command bang query (`"!zen"`), URL, app bundle path, or command target. |
+| `arguments` | Object / Array | Optional | Optional argument dictionary or list. |
+
+#### Flexible Shorthand Formats
+
+Titik supports concise shortcut declarations:
+
+1. **Top-level Command / URL:**
+```json
+{
+  "key": "k",
+  "modifiers": ["cmd", "shift"],
+  "command": "!zen"
+}
+```
+
+2. **String Action:**
+```json
+{
+  "keys": "opt+space",
+  "action": "!emoji"
+}
+```
+
+3. **Key-Value Mapping Dictionary:**
+```json
+"shortcuts": {
+  "cmd+shift+k": "!zen",
+  "opt+space": "!emoji",
+  "cmd+shift+a": "https://apple.com"
+}
+```
+
+#### Manual / On-Demand Reload
+
+Hotkeys are registered at application startup. To reload updated shortcuts without restarting Titik, use either command from the palette HUD:
+
+- `!keys reload` (or the reload button in the shortcuts manager)
+- `!plugin reload`
+
+> [!NOTE]
+> Titik does not watch `config.json` in the background for continuous file changes to avoid unnecessary system overhead and unintended hotkey re-registrations during editing. Reloading is strictly manual and on demand.
+
+---
+
 ## Full Default Configuration File
 
 ```json
@@ -153,6 +235,20 @@ Configures interaction behaviors and integration settings.
     "max_clipboard_history": 100,
     "show_preview_pane": true,
     "excluded_apps": []
-  }
+  },
+  "plugins": {
+    "titik.system.plugin": true,
+    "titik.builtin.app": true,
+    "titik.builtin.file": true,
+    "titik.builtin.clipboard": true,
+    "titik.builtin.system": true,
+    "titik.builtin.calculator": true,
+    "titik.builtin.emoji": true,
+    "titik.builtin.zen": true,
+    "titik.builtin.launcher": true,
+    "titik.builtin.shortcuts": true
+  },
+  "shortcuts": []
 }
 ```
+

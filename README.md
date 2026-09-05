@@ -13,8 +13,8 @@ A lightning-fast, extensible macOS command palette and spotlight launcher built 
 ## Key Features
 
 - ⚡️ **Ultra-fast App & Binary Launcher** — Instantly index and launch native macOS applications, preference panes, and command-line utilities.
-- 🔍 **Fuzzy File Search & Live In-Memory Directory Navigation** — Fast hierarchical file system traversal starting with `/` or `~`, full keyboard autocomplete with `Tab` and `Right Arrow`, and quick step-back with `Left Arrow` or `..`.
-- 🧩 **C ABI Dynamic Plugin Architecture** — Extensible `.dylib` dynamic plugin engine with zero-overhead C ABI interface (`plugin_api.h`) and `!bang` triggers (e.g. `!math`, `!calc`).
+- 🔍 **Fuzzy File Search & Live In-Memory Directory Navigation** — Fast hierarchical file system traversal starting with `/` or `~`, full keyboard autocomplete with `Tab` and `Right Arrow`, and quick step-back with `Left Arrow`.
+- 🧩 **macOS Loadable Bundle Plugin Architecture** — Extensible `.bundle` / `.titikplugin` loadable bundle architecture with out-of-process execution (`titik-worker`), code signature validation, and `!bang` triggers (e.g. `!zen`, `!calc`).
 - 📋 **Clipboard History Manager & Automated Accessibility Pasting** — Background clipboard monitoring with real-time fuzzy recall, previewing, and automated synthetic keyboard pasting via macOS Accessibility APIs.
 - 🧮 **Embedded Math Evaluator & Unit Converter** — High-performance recursive descent math parser supporting arithmetic, trigonometry, bitwise operations, powers, constants (`pi`, `e`), and unit conversions.
 - ⚙️ **Native System Commands** — Built-in system management tasks including dark/light mode toggle, lock screen, sleep, restart, shutdown, volume mute, and screensaver activation.
@@ -28,16 +28,14 @@ A lightning-fast, extensible macOS command palette and spotlight launcher built 
 
 - macOS 13.0 (Ventura) or later
 - Swift 6.0+ toolchain (Xcode 16+ or Command Line Tools)
-- `make` and `clang`
 
 ### Building from Source
 
+Clone the repository and build using the provided `Makefile`:
+
 ```bash
-# Clone the repository
 git clone https://github.com/dwlhm/titik.git
 cd titik
-
-# Initialize default configuration, compile C plugins, and build release binary
 make all
 
 # Build the macOS app bundle and install to ~/Applications
@@ -110,7 +108,7 @@ Titik is designed as a modular suite of Swift packages and libraries:
 - **`TitikCore`**: Core primitives, Configuration Manager (`ConfigManager`), Path Resolver (`PathResolver`), Fuzzy Matcher (`FuzzyMatcher`), App Indexer (`AppLauncher`), Clipboard Manager (`ClipboardManager`), and System Commands (`SystemCommands`).
 - **`TitikKeymap`**: Global hotkey registration via Carbon APIs (`HotkeyManager`), keycode mappings, and key combination registry (`KeymapRegistry`).
 - **`TitikParser`**: Fast recursive descent tokenizer and parser for expressions, commands, and math AST generation.
-- **`TitikPlugins`**: Dynamic plugin loader (`PluginHost`) that communicates with `.dylib` shared libraries via standard C ABI (`plugin_api.h`).
+- **`TitikPlugins`**: Dynamic bundle loader and registry (`PluginHost`, `PluginManager`) supporting Apple `.bundle` plugins and out-of-process isolation with `titik-worker`.
 - **`TitikSearch`**: Unified search orchestration engine (`SearchEngine`) ranking and multiplexing applications, file paths, math evaluation, system commands, and plugin results.
 - **`TitikUI`**: SwiftUI & AppKit hybrid user interface with liquid glass HUD materials, spring physics, split-view previews, and toast notifications.
 - **`TitikPlatform`**: Orchestration layer (`UIOrchestrator`, `WindowController`, `AutoPaster`) handling window lifecycle, event taps, and accessibility pasting.
@@ -155,28 +153,43 @@ For complete field specifications, styling tokens, and hotkey configurations, re
 
 ## Dynamic Plugins
 
-Titik supports dynamic plugins compiled as native dynamic libraries (`.dylib`) written in C, C++, Rust, or Swift. Plugins integrate seamlessly through the zero-overhead C ABI:
+Titik supports dynamic plugins packaged as macOS loadable bundles (`.bundle` or `.titikplugin`). Dynamic plugins conform to `TitikPlugin` / `TitikStreamingPlugin` protocols via `TitikPluginKit`, running out-of-process under `titik-worker` with code signature verification:
 
-```c
-#include "plugin_api.h"
+```swift
+import Foundation
+import TitikCore
+import TitikPluginKit
 
-static TitikPlugin plugin = {
-    .id = "titik.plugin.custom",
-    .name = "Custom Tool",
-    .version = "1.0.0",
-    .short_bang = "!tool",
-    .init = plugin_init,
-    .query = plugin_query,
-    .execute = plugin_execute,
-    .shutdown = plugin_shutdown
-};
+public final class CustomPlugin: TitikStreamingPlugin, @unchecked Sendable {
+    public static let id = "titik.plugin.custom"
+    public static let name = "Custom Tool"
+    public static let version = "1.0.0"
+    public static let sdkVersion = titikSDKVersion
 
-TITIK_PLUGIN_EXPORT const TitikPlugin *titik_plugin_entry(void) {
-    return &plugin;
+    public let context: PluginContext
+    public required init(context: PluginContext) {
+        self.context = context
+    }
+
+    public func onQuery(_ query: String) async throws -> PluginCanvas {
+        let items = [
+            PluginItem(
+                id: "tool-item",
+                title: "Custom Tool Result",
+                subtitle: "Query: \(query)",
+                icon: "🧘",
+                actionPayload: query,
+                pluginId: Self.id
+            )
+        ]
+        return .list(items)
+    }
+
+    public func cancelActiveStream() async {}
 }
 ```
 
-Drop compiled `.dylib` files into `~/.config/titik/plugins/` to load them automatically. See the [Plugin Development Guide](docs/PLUGINS.md) for full instructions and examples.
+Drop compiled `.bundle` directories into `~/.config/titik/plugins/` to load them automatically. See the [Plugin Development Guide](docs/PLUGINS.md) for full instructions and packaging scripts.
 
 ---
 

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "==> Running pre-commit checks..."
+
+# 1. Format check
+if command -v swift-format >/dev/null 2>&1; then
+    echo "--> Running swift-format check..."
+    make format-check
+else
+    echo "--> [WARN] swift-format is not installed; skipping format check."
+fi
+
+# 2. SwiftLint check
+if command -v swiftlint >/dev/null 2>&1; then
+    echo "--> Running swiftlint check..."
+    make lint
+else
+    echo "--> [WARN] swiftlint is not installed; skipping lint check."
+fi
+
+# 3. Unit tests
+echo "--> Running unit tests..."
+if grep -q "^test-unit:" Makefile 2>/dev/null; then
+    make test-unit
+else
+    make test
+fi
+
+echo "==> All pre-commit checks passed successfully."

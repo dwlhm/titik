@@ -18,10 +18,16 @@ let package = Package(
         .library(name: "TitikSearch", targets: ["TitikSearch"]),
         .library(name: "TitikPlatform", targets: ["TitikPlatform"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/nicklockwood/Expression.git", from: "0.13.0"),
+        .package(url: "https://github.com/swiftlang/swift-markdown.git", from: "0.5.0")
+    ],
     targets: [
         .target(
             name: "TitikCore",
-            dependencies: []
+            dependencies: [
+                .product(name: "Expression", package: "Expression")
+            ]
         ),
         .target(
             name: "TitikKeymap",
@@ -37,11 +43,16 @@ let package = Package(
         ),
         .target(
             name: "TitikPluginKit",
-            dependencies: ["TitikCore", "TitikKeymap", "TitikUI"]
+            dependencies: [
+                "TitikCore",
+                "TitikKeymap",
+                "TitikUI",
+                .product(name: "Markdown", package: "swift-markdown")
+            ]
         ),
         .target(
             name: "TitikPlugins",
-            dependencies: ["TitikCore", "TitikPluginKit"]
+            dependencies: ["TitikCore", "TitikKeymap", "TitikUI", "TitikPluginKit", "TitikParser"]
         ),
         .target(
             name: "TitikSearch",
@@ -60,16 +71,33 @@ let package = Package(
             dependencies: ["TitikCore", "TitikPluginKit", "TitikPlugins"]
         ),
         .testTarget(
-            name: "TitikTests",
+            name: "TitikParserTests",
+            dependencies: [
+                "TitikParser"
+            ]
+        ),
+        .testTarget(
+            name: "TitikCoreTests",
             dependencies: [
                 "TitikCore",
-                "TitikKeymap",
+                "TitikParser"
+            ]
+        ),
+        .testTarget(
+            name: "TitikKeymapTests",
+            dependencies: [
+                "TitikCore",
+                "TitikKeymap"
+            ]
+        ),
+        .testTarget(
+            name: "TitikSearchTests",
+            dependencies: [
+                "TitikCore",
                 "TitikParser",
-                "TitikPlugins",
-                "TitikUI",
                 "TitikSearch",
-                "TitikPlatform",
-                "TitikPluginKit"
+                "TitikPluginKit",
+                "TitikPlugins"
             ]
         ),
         .testTarget(
@@ -77,10 +105,18 @@ let package = Package(
             dependencies: [
                 "TitikCore",
                 "TitikKeymap",
+                "TitikPluginKit"
+            ]
+        ),
+        .testTarget(
+            name: "TitikPluginsTests",
+            dependencies: [
+                "TitikCore",
+                "TitikKeymap",
                 "TitikUI",
                 "TitikPluginKit",
                 "TitikPlugins",
-                "TitikPlatform"
+                "TitikParser"
             ]
         ),
         .testTarget(
@@ -107,5 +143,6 @@ let package = Package(
                 "TitikPlatform"
             ]
         )
-    ]
+    ],
+    swiftLanguageModes: [.v6]
 )

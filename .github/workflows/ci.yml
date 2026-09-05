@@ -28,5 +28,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-spm-
 
-      - name: Verify Build & Test Suite
-        run: make verify
+      - name: Check Code Formatting
+        run: make format-check
+
+      - name: Run SwiftLint Check
+        run: make lint
+
+      - name: Run Fast-Fail Modular Unit Tests
+        run: make test-unit
+
+      - name: Build Release Binaries and Application Bundle
+        run: make bundle

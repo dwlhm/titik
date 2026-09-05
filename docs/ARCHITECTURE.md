@@ -54,8 +54,9 @@ Titik is built as a multi-target Swift package designed with clean boundaries, h
    - **AST Types**: Distinguishes empty queries, math expressions (`BinaryOp`, `UnaryOp`, `FunctionCall`, `Constant`), bang commands, and raw text queries.
 
 4. **`TitikPlugins`**
-   - **`plugin_api.h`**: Stable C99 header declaring C ABI plugin entry points, data structures, and function pointers.
-   - **`PluginHost`**: Dynamic loader utilizing `dlopen`, `dlsym`, and `dlclose` to discover, initialize, query, and execute plugins residing in `~/.config/titik/plugins/` and app bundle `PlugIns/`.
+   - **`PluginHost`**: Dynamic bundle loader and registry discovering Apple `.bundle` and `.titikplugin` directories in `~/.config/titik/plugins/` and app bundle `PlugIns/`.
+   - **`PluginManager`**: Manages plugin discovery, configuration state synchronization, enable/disable lifecycle, and hot-reload.
+   - **Out-of-Process Worker (`titik-worker`)**: Dedicated sandboxed worker running dynamic plugins via Unix domain IPC pipes, memory isolation (2GB address space limits), and code signature verification.
 
 5. **`TitikSearch`**
    - **`SearchEngine`**: Central dispatch provider querying applications, file hierarchies, math evaluation (`MathEvaluator`), clipboard history, and dynamic plugins.
@@ -119,33 +120,43 @@ sequenceDiagram
 
 ---
 
-## 3. C ABI Dynamic Plugin Architecture
+## 3. macOS Loadable Bundle Architecture
 
-Titik enables dynamic extension without requiring recompilation of the host binary. Plugins are shared libraries (`.dylib`) implementing the C ABI interface defined in `plugin_api.h`.
+Titik enables dynamic extension without requiring recompilation of the host binary. Plugins are standard Apple loadable bundles (`.bundle` or `.titikplugin`) conforming to `TitikPluginKit` protocols (`TitikPlugin`, `TitikStreamingPlugin`).
 
-### Lifecycle Contract
+### Bundle Structure
 
 ```text
-Host (Titik)                                  Plugin (.dylib)
-     │                                              │
-     │── dlopen("plugin.dylib") ───────────────────>│
-     │── dlsym("titik_plugin_entry") ──────────────>│
-     │<── Returns TitikPlugin struct pointer ───────│
-     │                                              │
-     │── plugin->init() ───────────────────────────>│
-     │<── Returns 0 (success) ──────────────────────│
-     │                                              │
-     │── plugin->query(query_str, items_buf, max) ─>│
-     │<── Returns item count ───────────────────────│
-     │                                              │
-     │── plugin->execute(item_id, payload) ────────>│
-     │<── Returns 0 (success) ──────────────────────│
-     │                                              │
-     │── plugin->shutdown() ───────────────────────>│
-     │── dlclose(handle) ──────────────────────────>│
+MyPlugin.bundle/
+└── Contents/
+    ├── Info.plist              (CFBundleIdentifier, NSPrincipalClass)
+    ├── MacOS/
+    │   └── MyPlugin            (Mach-O loadable bundle/library binary)
+    └── Resources/
+        └── manifest.json       (Metadata, triggers, permissions, icon)
 ```
 
-Memory safety is guaranteed by stack-allocated host buffers (`TitikPluginItem` array passed into `query`) avoiding foreign heap allocation issues between host and dynamic libraries.
+### Lifecycle & Loading Contract
+
+```text
+Host (Titik / titik-worker)                    Plugin Bundle (.bundle)
+     │                                                   │
+     │── Validate directory & manifest.json ────────────>│
+     │── Verify code signature (SecStaticCode) ─────────>│
+     │── Bundle(url: bundleURL).load() ──────────────────>│
+     │── Resolve principal class (NSPrincipalClass) ─────>│
+     │<── Returns conforming TitikPlugin.Type ───────────│
+     │                                                   │
+     │── pluginType.init(context: PluginContext) ───────>│
+     │<── Plugin instance ready ─────────────────────────│
+     │                                                   │
+     │── plugin.onQuery(subquery) [async] ───────────────>│
+     │<── Returns PluginCanvas (.list, .streaming) ──────│
+     │                                                   │
+     │── plugin.onShutdown() ────────────────────────────>│
+```
+
+Memory safety and crash resilience are guaranteed through out-of-process isolation: plugins execute in isolated `titik-worker` processes with address space limits (2GB RLIMIT_AS), memory sandboxing, and swift async cancellation.
 
 ---
 
