@@ -23,7 +23,10 @@ build:
 bundle: build plugins
 	@bash scripts/build_bundle.sh
 
-verify: test bundle
+pipeline:
+	@bash scripts/pipeline.sh
+
+verify: pipeline
 
 install-hooks:
 	@git config core.hooksPath .githooks 2>/dev/null || [ "$$(git config core.hooksPath 2>/dev/null)" = ".githooks" ] || git config core.hooksPath .githooks
@@ -110,4 +113,4 @@ clean:
 	@rm -rf bin .build
 	@echo "==> Clean complete."
 
-.PHONY: all setup build bundle install run clean test plugins verify install-hooks format format-check lint lint-fix test-unit test-fast test-e2e test-plugins
+.PHONY: all setup build bundle install run clean test plugins verify install-hooks format format-check lint lint-fix test-unit test-fast test-e2e test-plugins pipeline

@@ -30,11 +30,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-spm-
 
-      - name: Run Test Suite
-        run: make test
-
-      - name: Build Application Bundle
-        run: make bundle
+      - name: Run Verification Pipeline (Format Check, Lint, Full Test Suite, Bundle)
+        run: make pipeline
 
       - name: Package Release Assets
         run: |

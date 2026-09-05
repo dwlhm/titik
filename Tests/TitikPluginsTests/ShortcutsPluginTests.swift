@@ -330,13 +330,13 @@ struct ShortcutsPluginTests {
     }
 
     @MainActor
-    private func waitUntil(timeoutNanoseconds: UInt64 = 1_000_000_000, condition: @MainActor () -> Bool) async throws {
+    private func waitUntil(timeoutNanoseconds: UInt64 = 2_000_000_000, condition: @MainActor () -> Bool) async throws {
         let start = DispatchTime.now().uptimeNanoseconds
         while !condition() {
             if DispatchTime.now().uptimeNanoseconds - start > timeoutNanoseconds {
                 break
             }
-            try await Task.sleep(nanoseconds: 30_000_000)
+            try await Task.sleep(nanoseconds: 20_000_000)
         }
     }
 
@@ -347,24 +347,33 @@ struct ShortcutsPluginTests {
         let vm = ShortcutsPluginViewModel()
 
         vm.formCommand = "!app"
-        try await Task.sleep(nanoseconds: 200_000_000)
+        try await waitUntil {
+            !vm.activeRecommendations.isEmpty && vm.activeRecommendations.allSatisfy { $0.iconName == "app.badge" }
+        }
         #expect(!vm.activeRecommendations.isEmpty)
         #expect(vm.activeRecommendations.allSatisfy { $0.iconName == "app.badge" })
 
         vm.formCommand = "!app "
-        try await Task.sleep(nanoseconds: 200_000_000)
+        try await waitUntil {
+            !vm.activeRecommendations.isEmpty
+                && vm.activeRecommendations.allSatisfy { $0.example.hasPrefix("!app") && $0.iconName == "app.badge" }
+        }
         #expect(!vm.activeRecommendations.isEmpty)
         #expect(vm.activeRecommendations.allSatisfy { $0.example.hasPrefix("!app") })
         #expect(vm.activeRecommendations.allSatisfy { $0.iconName == "app.badge" })
 
         vm.formCommand = "app "
-        try await Task.sleep(nanoseconds: 200_000_000)
+        try await waitUntil {
+            !vm.activeRecommendations.isEmpty && vm.activeRecommendations.allSatisfy { $0.example.hasPrefix("!app") }
+        }
         #expect(!vm.activeRecommendations.isEmpty)
         #expect(vm.activeRecommendations.allSatisfy { $0.example.hasPrefix("!app") })
 
         // Word boundary enforcement: "!apple" should not match !app prefix branch
         vm.formCommand = "!apple"
-        try await Task.sleep(nanoseconds: 200_000_000)
+        try await waitUntil {
+            vm.activeRecommendations.allSatisfy { !$0.example.hasPrefix("!app ") }
+        }
         #expect(vm.activeRecommendations.allSatisfy { !$0.example.hasPrefix("!app ") })
     }
 
@@ -375,12 +384,19 @@ struct ShortcutsPluginTests {
         let vm = ShortcutsPluginViewModel()
 
         vm.formCommand = "!cmd"
-        try await Task.sleep(nanoseconds: 200_000_000)
+        try await waitUntil {
+            !vm.activeRecommendations.isEmpty && vm.activeRecommendations.allSatisfy { $0.iconName == "gearshape.fill" }
+        }
         #expect(!vm.activeRecommendations.isEmpty)
         #expect(vm.activeRecommendations.allSatisfy { $0.iconName == "gearshape.fill" })
 
         vm.formCommand = "!cmd "
-        try await Task.sleep(nanoseconds: 200_000_000)
+        try await waitUntil {
+            !vm.activeRecommendations.isEmpty
+                && vm.activeRecommendations.contains(where: { $0.example.contains("lock") })
+                && vm.activeRecommendations.contains(where: { $0.example.contains("sleep") })
+                && vm.activeRecommendations.allSatisfy { $0.iconName == "gearshape.fill" }
+        }
         #expect(!vm.activeRecommendations.isEmpty)
         let examples = vm.activeRecommendations.map(\.example)
         #expect(examples.contains(where: { $0.contains("lock") }))
@@ -388,12 +404,16 @@ struct ShortcutsPluginTests {
         #expect(vm.activeRecommendations.allSatisfy { $0.iconName == "gearshape.fill" })
 
         vm.formCommand = "!cmd lock"
-        try await Task.sleep(nanoseconds: 200_000_000)
+        try await waitUntil {
+            vm.activeRecommendations.contains(where: { $0.example.contains("lock") })
+        }
         #expect(vm.activeRecommendations.contains(where: { $0.example.contains("lock") }))
 
         // Word boundary enforcement: "!cmdline" should not match !cmd prefix branch
         vm.formCommand = "!cmdline"
-        try await Task.sleep(nanoseconds: 200_000_000)
+        try await waitUntil {
+            vm.activeRecommendations.allSatisfy { !$0.example.hasPrefix("!cmd ") }
+        }
         #expect(vm.activeRecommendations.allSatisfy { !$0.example.hasPrefix("!cmd ") })
     }
 
@@ -549,11 +569,8 @@ struct ShortcutsPluginTests {
         #expect(vm.activeRecommendations.allSatisfy { $0.id != "bridge-item" })
 
         // Wait for debounce (150ms) to complete
-        for _ in 0..<20 {
-            if vm.activeRecommendations.contains(where: { $0.id == "bridge-item" }) {
-                break
-            }
-            try await Task.sleep(nanoseconds: 50_000_000)
+        try await waitUntil {
+            bridgeCalledBox.get() && vm.activeRecommendations.contains(where: { $0.id == "bridge-item" })
         }
 
         #expect(bridgeCalledBox.get() == true)
@@ -563,8 +580,16 @@ struct ShortcutsPluginTests {
         #expect(!vm.activeRecommendations.contains(where: { $0.example == "!bridge query1" }))
 
         // Trigger update again to verify no duplicate additions
+        var updateTriggered = false
+        let updateSub = vm.$activeRecommendations.dropFirst().sink { _ in
+            updateTriggered = true
+        }
+        defer { updateSub.cancel() }
+
         vm.updateRecommendations(for: "query2")
-        try await Task.sleep(nanoseconds: 250_000_000)
+        try await waitUntil {
+            updateTriggered && vm.activeRecommendations.filter { $0.id == "bridge-item" }.count == 1
+        }
 
         let matchingItems = vm.activeRecommendations.filter { $0.id == "bridge-item" }
         #expect(matchingItems.count == 1)
@@ -923,7 +948,9 @@ struct ShortcutsPluginTests {
         defer { ShortcutsPluginViewModel.searchBridge = nil }
 
         vm.formCommand = "!cmd"
-        try await Task.sleep(nanoseconds: 300_000_000)
+        try await waitUntil {
+            updateCount == 1 && vm.activeRecommendations.contains(where: { $0.id == "bridge-item" })
+        }
 
         // Active recommendations should contain both internal and bridge results
         #expect(vm.activeRecommendations.contains(where: { $0.id == "bridge-item" }))
@@ -935,7 +962,9 @@ struct ShortcutsPluginTests {
         // Deduplication test: duplicate ID and example should not produce duplicate entries
         let currentCount = vm.activeRecommendations.count
         vm.updateRecommendations(for: "!cmd")
-        try await Task.sleep(nanoseconds: 300_000_000)
+        try await waitUntil {
+            updateCount == 2
+        }
         #expect(vm.activeRecommendations.count == currentCount)
     }
 
@@ -946,7 +975,9 @@ struct ShortcutsPluginTests {
         let vm = ShortcutsPluginViewModel()
 
         vm.formCommand = "!app"
-        try await Task.sleep(nanoseconds: 300_000_000)
+        try await waitUntil {
+            vm.activeRecommendations.contains { $0.bang == "!app" }
+        }
 
         let appRecs = vm.activeRecommendations.filter { $0.bang == "!app" }
         #expect(!appRecs.isEmpty)

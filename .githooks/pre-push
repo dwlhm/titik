@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "==> Running pre-push verification (make verify)..."
-make verify
+echo "==> Running pre-push verification (make pipeline)..."
+make pipeline
 echo "==> Pre-push verification passed."
