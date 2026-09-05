@@ -268,7 +268,7 @@ struct E2EConfigLiveReloadTests {
 
         // Wait for debounced reload
         let waitResult = await waitForCondition(timeoutSeconds: 2.0) {
-            changeBox.get() != nil
+            changeBox.get()?.window.width == 950
         }
         #expect(waitResult)
         #expect(changeBox.get()?.window.width == 950)

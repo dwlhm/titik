@@ -219,8 +219,7 @@ struct E2ERealWorldScenariosTests {
 
     @Test("Tier 4: Scenario B - Project Launcher palette mode pre-fill and directory navigation")
     func test_tier4_projectLauncherPalettePreFillScenario() {
-        let targetPath = "~/project/titik"
-        let resolved = PathResolver.expandPath(targetPath)
+        let resolved = FileManager.default.currentDirectoryPath
 
         var isDir: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: resolved, isDirectory: &isDir)

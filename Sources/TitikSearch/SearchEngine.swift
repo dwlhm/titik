@@ -584,13 +584,19 @@ public final class SearchEngine: @unchecked Sendable {
                     }
 
                     if let cmdPlugin = self?.pluginHost.getNativePlugin(id: manifest.id) as? (any TitikCommandPlugin) {
-                        let sema = DispatchSemaphore(value: 0)
-                        Task {
-                            let ctx = CommandExecutionContext(trigger: "search", mode: .background, rawInput: pItem.actionPayload)
-                            _ = try? await cmdPlugin.executeCommand(id: pItem.actionPayload, arguments: [:], context: ctx)
-                            sema.signal()
+                        let ctx = CommandExecutionContext(trigger: "search", mode: .background, rawInput: pItem.actionPayload)
+                        if Thread.isMainThread {
+                            Task {
+                                _ = try? await cmdPlugin.executeCommand(id: pItem.actionPayload, arguments: [:], context: ctx)
+                            }
+                        } else {
+                            let sema = DispatchSemaphore(value: 0)
+                            Task {
+                                _ = try? await cmdPlugin.executeCommand(id: pItem.actionPayload, arguments: [:], context: ctx)
+                                sema.signal()
+                            }
+                            _ = sema.wait(timeout: .now() + .seconds(2))
                         }
-                        _ = sema.wait(timeout: .now() + .seconds(2))
                         return true
                     }
 

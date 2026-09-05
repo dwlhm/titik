@@ -125,6 +125,10 @@ struct SearchEngineCommandRoutingTests {
 
         let actionResult = results.first?.action()
         #expect(actionResult == true)
+        for _ in 0..<50 {
+            if invokedBox.get() { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
         #expect(invokedBox.get() == true)
     }
 
