@@ -48,4 +48,11 @@ struct FuzzyMatcherTests {
         let nonMatch = FuzzyMatcher.match(query: "xyz", target: "Safari")
         #expect(nonMatch == nil)
     }
+
+    @Test("Negative score returns nil")
+    func testNegativeScoreReturnsNil() {
+        let target = "u" + String(repeating: "a", count: 1000) + "b"
+        let match = FuzzyMatcher.match(query: "ub", target: target)
+        #expect(match == nil)
+    }
 }

@@ -89,7 +89,7 @@ public final class ClipboardPlugin: TitikCommandPlugin, TitikStreamingPlugin, Ti
 
         var matched: [PluginItem] = []
         for clip in items {
-            if let match = FuzzyMatcher.match(query: trimmed, target: clip.content) {
+            if let match = FuzzyMatcher.match(query: trimmed, target: clip.content), match.score > 0 {
                 matched.append(
                     PluginItem(
                         id: "\(Self.id):\(clip.id.uuidString)",
@@ -115,7 +115,7 @@ public final class ClipboardPlugin: TitikCommandPlugin, TitikStreamingPlugin, Ti
         let items = clipboardManager.getItems()
         var results: [PluginItem] = []
         for clip in items {
-            if let match = FuzzyMatcher.match(query: trimmed, target: clip.content) {
+            if let match = FuzzyMatcher.match(query: trimmed, target: clip.content), match.score > 0 {
                 results.append(
                     PluginItem(
                         id: "\(Self.id):\(clip.id.uuidString)",

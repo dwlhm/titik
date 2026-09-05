@@ -93,6 +93,10 @@ public enum FuzzyMatcher {
             score += 150
         }
 
+        guard score > 0 else {
+            return nil
+        }
+
         return FuzzyMatchResult(score: score, matchedIndices: matchedIndices)
     }
 }
