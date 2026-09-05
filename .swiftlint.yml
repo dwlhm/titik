@@ -1,0 +1,76 @@
+opt_in_rules:
+  - weak_delegate
+  - duplicate_imports
+  - unneeded_break_in_switch
+  - empty_count
+  - first_where
+  - contains_over_filter_is_empty
+  - contains_over_first_not_nil
+  - duplicate_conditions
+
+disabled_rules:
+  - todo
+  - identifier_name
+  - trailing_whitespace
+  - file_length
+  - type_body_length
+  - cyclomatic_complexity
+  - function_body_length
+  - line_length
+  - legacy_swiftui_aspect_ratio
+  - implicit_optional_initialization
+  - multiple_closures_with_trailing_closure
+  - vertical_whitespace
+  - unused_closure_parameter
+  - force_unwrapping
+
+excluded:
+  - .build
+  - bin
+  - config
+  - .agents
+
+empty_count:
+  severity: warning
+
+custom_rules:
+  bang_delimiter_contract:
+    name: "Core '!<bang> ' Delimiter Contract (ADR 5)"
+    regex: 'findActivePlugin\(forQuery:'
+    message: "ADR 5 Violation: Plugin view activation must be space-delimited ('!<bang> ') and routed strictly through CommandParser AST."
+    severity: error
+
+  no_concrete_plugin_leak_in_platform:
+    name: "No Concrete Plugin Coupling in Platform"
+    regex: 'TitikPlugins\.[A-Za-z0-9]+Plugin'
+    included:
+      - "Sources/TitikPlatform"
+      - "Sources/TitikUI"
+    message: "Architectural Leak: TitikPlatform and TitikUI must interact with plugins only via PluginUIRepresentable or PluginContext protocols, never via concrete plugin types."
+    severity: error
+
+  no_hardcoded_plugin_callbacks:
+    name: "No Hardcoded Plugin Callbacks in Orchestrator"
+    regex: 'manifest\.id\s*==\s*TitikPlugins\.'
+    included:
+      - "Sources/TitikPlatform"
+    message: "Code Smell: Do not write plugin-specific if-branches in UIOrchestrator. Use polymorphic protocol methods on PluginUIRepresentable."
+    severity: error
+
+  no_manual_key_monitoring_in_plugins:
+    name: "No Manual Key Monitoring in Plugins"
+    regex: '(addLocalMonitorForEvents|addGlobalMonitorForEvents|CGEventTap|CGEvent\.tapCreate|RegisterEventHotKey|InstallEventHandler)'
+    included:
+      - "Sources/TitikPlugins"
+    message: "Security Violation: Plugins are strictly forbidden from manually listening to keyboard events. Use PluginKeymapScope instead."
+    severity: error
+
+  no_manual_keydown_in_plugins:
+    name: "No Manual handleKeyDown in Plugins"
+    regex: 'func\s+handleKeyDown\(event:'
+    included:
+      - "Sources/TitikPlugins"
+      - "Sources/TitikUI"
+    message: "Architecture Violation: handleKeyDown is deprecated and forbidden. All shortcuts must be declared via PluginKeymapScope."
+    severity: error
+
