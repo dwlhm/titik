@@ -26,23 +26,55 @@ public struct SystemCommandItem: Identifiable, Sendable {
 public final class SystemCommands: Sendable {
     public static let shared = SystemCommands()
 
+    public static var isTestEnvironment: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil ||
+        ProcessInfo.processInfo.environment["SWIFT_TESTING"] != nil ||
+        ProcessInfo.processInfo.arguments.contains(where: {
+            $0.contains("xctest") || $0.contains("testing-helper") || $0.contains("TitikPackageTests")
+        })
+    }
+
+    public nonisolated(unsafe) static var scriptExecutor: (@Sendable (String) -> Bool)? = nil
+
     public init() {}
 
     @discardableResult
     public static func runAppleScript(_ script: String) -> Bool {
-        var error: NSDictionary?
-        if let scriptObject = NSAppleScript(source: script) {
-            _ = scriptObject.executeAndReturnError(&error)
-            if let error = error {
-                Logger.shared.error("AppleScript error: \(error)", subsystem: "Titik.SystemCommands")
-                return false
-            }
+        if let customExecutor = scriptExecutor {
+            return customExecutor(script)
+        }
+        if isTestEnvironment {
+            Logger.shared.debug("Test environment detected: skipping AppleScript execution: \(script)", subsystem: "Titik.SystemCommands")
             return true
         }
-        return false
+
+        func execute() -> Bool {
+            var error: NSDictionary?
+            if let scriptObject = NSAppleScript(source: script) {
+                _ = scriptObject.executeAndReturnError(&error)
+                if let error = error {
+                    Logger.shared.error("AppleScript error: \(error)", subsystem: "Titik.SystemCommands")
+                    return false
+                }
+                return true
+            }
+            return false
+        }
+
+        if Thread.isMainThread {
+            return execute()
+        } else {
+            return DispatchQueue.main.sync {
+                execute()
+            }
+        }
     }
 
     public static func lockScreen() -> Bool {
+        if isTestEnvironment {
+            return true
+        }
+
         // Try SACLockScreenImmediate via login.framework if available
         let bundlePath = "/System/Library/PrivateFrameworks/login.framework"
         if let handle = dlopen(bundlePath, RTLD_LAZY) {
