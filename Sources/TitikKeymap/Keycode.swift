@@ -65,6 +65,20 @@ public enum Keycode: UInt32, CaseIterable, Hashable, Sendable {
     case leftArrow = 0x7B
     case rightArrow = 0x7C
 
+    // Function keys
+    case f1 = 0x7A
+    case f2 = 0x78
+    case f3 = 0x63
+    case f4 = 0x76
+    case f5 = 0x60
+    case f6 = 0x61
+    case f7 = 0x62
+    case f8 = 0x64
+    case f9 = 0x65
+    case f10 = 0x6D
+    case f11 = 0x67
+    case f12 = 0x6F
+
     public var displayGlyph: String {
         switch self {
         case .returnKey: return "↵"
@@ -80,6 +94,18 @@ public enum Keycode: UInt32, CaseIterable, Hashable, Sendable {
         case .downArrow: return "↓"
         case .leftArrow: return "←"
         case .rightArrow: return "→"
+        case .f1: return "F1"
+        case .f2: return "F2"
+        case .f3: return "F3"
+        case .f4: return "F4"
+        case .f5: return "F5"
+        case .f6: return "F6"
+        case .f7: return "F7"
+        case .f8: return "F8"
+        case .f9: return "F9"
+        case .f10: return "F10"
+        case .f11: return "F11"
+        case .f12: return "F12"
         case .period: return "."
         case .comma: return ","
         case .slash: return "/"
@@ -138,21 +164,30 @@ public enum Keycode: UInt32, CaseIterable, Hashable, Sendable {
         case "/", "slash": return .slash
         case "\\", "backslash": return .backslash
         case "=", "equal", "equals": return .equal
+        case "+", "plus": return .equal
         case "-", "minus", "dash": return .minus
         case ";", "semicolon": return .semicolon
         case "'", "quote": return .quote
+        case "\"": return .quote
         case "`", "grave", "backquote", "backtick": return .grave
+        case "~": return .grave
         case "[", "leftbracket": return .leftBracket
         case "]", "rightbracket": return .rightBracket
-        case "space", " ": return .space
-        case "return", "enter", "cr", "lf": return .returnKey
-        case "esc", "escape": return .escape
-        case "tab": return .tab
-        case "delete", "backspace": return .delete
-        case "up", "uparrow": return .upArrow
-        case "down", "downarrow": return .downArrow
-        case "left", "leftarrow": return .leftArrow
-        case "right", "rightarrow": return .rightArrow
+        case "{": return .leftBracket
+        case "}": return .rightBracket
+        case ":": return .semicolon
+        case "<": return .comma
+        case ">": return .period
+        case "?": return .slash
+        case "space", " ", "␣": return .space
+        case "return", "enter", "cr", "lf", "↵": return .returnKey
+        case "esc", "escape", "⎋": return .escape
+        case "tab", "⇥": return .tab
+        case "delete", "backspace", "⌫": return .delete
+        case "up", "uparrow", "↑": return .upArrow
+        case "down", "downarrow", "↓": return .downArrow
+        case "left", "leftarrow", "←": return .leftArrow
+        case "right", "rightarrow", "→": return .rightArrow
         case "0": return .zero
         case "1": return .one
         case "2": return .two
@@ -189,6 +224,18 @@ public enum Keycode: UInt32, CaseIterable, Hashable, Sendable {
         case "x": return .x
         case "y": return .y
         case "z": return .z
+        case "f1": return .f1
+        case "f2": return .f2
+        case "f3": return .f3
+        case "f4": return .f4
+        case "f5": return .f5
+        case "f6": return .f6
+        case "f7": return .f7
+        case "f8": return .f8
+        case "f9": return .f9
+        case "f10": return .f10
+        case "f11": return .f11
+        case "f12": return .f12
         default: return nil
         }
     }

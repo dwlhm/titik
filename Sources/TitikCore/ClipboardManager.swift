@@ -35,7 +35,8 @@ public final class ClipboardManager: @unchecked Sendable {
     private let lock = NSLock()
     private var items: [ClipboardItem] = []
     private var lastChangeCount: Int
-    private var timer: Timer?
+    private let monitorQueue = DispatchQueue(label: "com.titik.clipboard.monitor", qos: .utility)
+    private var dispatchTimer: (any DispatchSourceTimer)?
     public var maxCapacity: Int = 100
     public let storageURL: URL
 
@@ -51,6 +52,10 @@ public final class ClipboardManager: @unchecked Sendable {
         self.lastChangeCount = NSPasteboard.general.changeCount
 
         loadHistory()
+    }
+
+    deinit {
+        stopMonitoring()
     }
 
     public func loadHistory() {
@@ -92,20 +97,26 @@ public final class ClipboardManager: @unchecked Sendable {
         }
     }
 
-    public func startMonitoring(interval: TimeInterval = 0.5) {
+    public func startMonitoring(interval: TimeInterval = 1.0) {
         lock.lock()
         defer { lock.unlock() }
 
-        guard timer == nil else { return }
+        guard dispatchTimer == nil else { return }
 
         // Initial check
         checkPasteboardLocked()
 
-        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+        let timer = DispatchSource.makeTimerSource(queue: monitorQueue)
+        timer.schedule(
+            deadline: .now() + interval,
+            repeating: interval,
+            leeway: .milliseconds(500)
+        )
+        timer.setEventHandler { [weak self] in
             self?.checkPasteboard()
         }
-        RunLoop.main.add(t, forMode: .common)
-        self.timer = t
+        timer.resume()
+        self.dispatchTimer = timer
         Logger.shared.info("Clipboard monitoring started", subsystem: "Titik.Clipboard")
     }
 
@@ -113,8 +124,8 @@ public final class ClipboardManager: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        timer?.invalidate()
-        timer = nil
+        dispatchTimer?.cancel()
+        dispatchTimer = nil
         Logger.shared.info("Clipboard monitoring stopped", subsystem: "Titik.Clipboard")
     }
 

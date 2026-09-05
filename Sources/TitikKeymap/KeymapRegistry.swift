@@ -4,6 +4,8 @@ import TitikCore
 public enum KeymapError: Error, Equatable, LocalizedError {
     case duplicateBinding(combination: KeyCombination, existingIdentifier: String)
     case notFound(identifier: String)
+    case carbonRegistrationFailed(status: OSStatus)
+    case invalidCombination(String)
 
     public var errorDescription: String? {
         switch self {
@@ -11,6 +13,10 @@ public enum KeymapError: Error, Equatable, LocalizedError {
             return "Key combination '\(combo)' is already bound to action '\(id)'"
         case .notFound(let id):
             return "Key binding with identifier '\(id)' not found"
+        case .carbonRegistrationFailed(let status):
+            return "Carbon EventHotKey registration failed with OSStatus \(status)"
+        case .invalidCombination(let str):
+            return "Invalid key combination: '\(str)'"
         }
     }
 }
@@ -18,11 +24,18 @@ public enum KeymapError: Error, Equatable, LocalizedError {
 public struct KeyBinding: Sendable {
     public let identifier: String
     public let combination: KeyCombination
+    public let mode: ShortcutExecutionMode
     public let action: @Sendable () -> Void
 
-    public init(identifier: String, combination: KeyCombination, action: @escaping @Sendable () -> Void) {
+    public init(
+        identifier: String,
+        combination: KeyCombination,
+        mode: ShortcutExecutionMode = .background,
+        action: @escaping @Sendable () -> Void
+    ) {
         self.identifier = identifier
         self.combination = combination
+        self.mode = mode
         self.action = action
     }
 }
@@ -39,6 +52,7 @@ public final class KeymapRegistry: @unchecked Sendable {
     public func register(
         combination: KeyCombination,
         identifier: String,
+        mode: ShortcutExecutionMode = .background,
         action: @escaping @Sendable () -> Void
     ) throws {
         lock.lock()
@@ -56,10 +70,10 @@ public final class KeymapRegistry: @unchecked Sendable {
             bindingsByCombo.removeValue(forKey: previousCombo)
         }
 
-        let binding = KeyBinding(identifier: identifier, combination: combination, action: action)
+        let binding = KeyBinding(identifier: identifier, combination: combination, mode: mode, action: action)
         bindingsByCombo[combination] = binding
         bindingsById[identifier] = combination
-        Logger.shared.debug("Registered key combination '\(combination)' for '\(identifier)'", subsystem: "Titik.Keymap")
+        Logger.shared.debug("Registered key combination '\(combination)' for '\(identifier)' (mode: \(mode.rawValue))", subsystem: "Titik.Keymap")
     }
 
     public func unregister(identifier: String) {
@@ -86,10 +100,23 @@ public final class KeymapRegistry: @unchecked Sendable {
         return bindingsByCombo[combination]
     }
 
+    public func find(identifier: String) -> KeyBinding? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let combo = bindingsById[identifier] else { return nil }
+        return bindingsByCombo[combo]
+    }
+
     public func isRegistered(combination: KeyCombination) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         return bindingsByCombo[combination] != nil
+    }
+
+    public func isRegistered(identifier: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return bindingsById[identifier] != nil
     }
 
     public func allBindings() -> [KeyBinding] {

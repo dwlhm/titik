@@ -25,8 +25,50 @@ public final class AppLauncher: @unchecked Sendable {
     private let lock = NSLock()
     private var cachedApps: [AppInfo] = []
     private var lastScanTime: Date?
+    private var activeScanTask: Task<[AppInfo], Never>?
+    private var iconCache: [String: NSImage] = [:]
 
     public init() {}
+
+    public func icon(forPath path: String) -> NSImage {
+        let cached: NSImage? = lock.withLock {
+            iconCache[path]
+        }
+        if let cached = cached {
+            return cached
+        }
+
+        let icon = NSWorkspace.shared.icon(forFile: path)
+        lock.withLock {
+            iconCache[path] = icon
+        }
+        return icon
+    }
+
+    private func getCachedApps() -> [AppInfo]? {
+        lock.withLock {
+            cachedApps.isEmpty ? nil : cachedApps
+        }
+    }
+
+    private func getOrStartScanTask() -> Task<[AppInfo], Never> {
+        lock.withLock {
+            if let existing = activeScanTask {
+                return existing
+            }
+            let newTask = Task<[AppInfo], Never> {
+                let scanned = self.performScanApplications(directories: AppLauncher.defaultSearchDirectories, maxDepth: 3)
+                self.lock.withLock {
+                    self.cachedApps = scanned
+                    self.lastScanTime = Date()
+                    self.activeScanTask = nil
+                }
+                return scanned
+            }
+            self.activeScanTask = newTask
+            return newTask
+        }
+    }
 
     public static let defaultSearchDirectories: [URL] = {
         let fileManager = FileManager.default
@@ -35,6 +77,10 @@ public final class AppLauncher: @unchecked Sendable {
             URL(fileURLWithPath: "/System/Applications"),
             URL(fileURLWithPath: "/System/Applications/Utilities")
         ]
+        let cryptexApps = URL(fileURLWithPath: "/System/Cryptexes/App/System/Applications")
+        if fileManager.fileExists(atPath: cryptexApps.path) {
+            urls.append(cryptexApps)
+        }
         let userApps = fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
         if fileManager.fileExists(atPath: userApps.path) {
             urls.append(userApps)
@@ -52,7 +98,7 @@ public final class AppLauncher: @unchecked Sendable {
         for app in apps {
             guard let bundleURL = app.bundleURL else { continue }
             let name = app.localizedName ?? bundleURL.deletingPathExtension().lastPathComponent
-            let icon = app.icon ?? NSWorkspace.shared.icon(forFile: bundleURL.path)
+            let icon = app.icon ?? self.icon(forPath: bundleURL.path)
             results.append(AppInfo(name: name, bundleURL: bundleURL, icon: icon, processIdentifier: app.processIdentifier))
         }
 
@@ -70,14 +116,20 @@ public final class AppLauncher: @unchecked Sendable {
             config.activates = true
 
             let semaphore = DispatchSemaphore(value: 0)
-            var success = false
+            nonisolated(unsafe) var success = false
 
             NSWorkspace.shared.openApplication(at: bundleURL, configuration: config) { app, error in
                 if let error = error {
-                    Logger.shared.error("Failed to activate app at \(bundleURL.path): \(error.localizedDescription)", subsystem: "Titik.AppLauncher")
+                    Logger.shared.error(
+                        "Failed to activate app at \(bundleURL.path): \(error.localizedDescription)",
+                        subsystem: "Titik.AppLauncher"
+                    )
                     success = false
                 } else {
-                    Logger.shared.info("Activated application: \(app?.localizedName ?? bundleURL.lastPathComponent)", subsystem: "Titik.AppLauncher")
+                    Logger.shared.info(
+                        "Activated application: \(app?.localizedName ?? bundleURL.lastPathComponent)",
+                        subsystem: "Titik.AppLauncher"
+                    )
                     success = true
                 }
                 semaphore.signal()
@@ -89,13 +141,23 @@ public final class AppLauncher: @unchecked Sendable {
         return false
     }
 
+    @discardableResult
     public func scanApplications(directories: [URL]? = nil, maxDepth: Int = 3) -> [AppInfo] {
-        let searchDirs = directories ?? AppLauncher.defaultSearchDirectories
+        let dirs = directories ?? AppLauncher.defaultSearchDirectories
+        let scanned = performScanApplications(directories: dirs, maxDepth: maxDepth)
+        lock.withLock {
+            self.cachedApps = scanned
+            self.lastScanTime = Date()
+        }
+        return scanned
+    }
+
+    private func performScanApplications(directories: [URL], maxDepth: Int) -> [AppInfo] {
         let fileManager = FileManager.default
         var results: [AppInfo] = []
         var seenPaths = Set<String>()
 
-        for dir in searchDirs {
+        for dir in directories {
             guard fileManager.fileExists(atPath: dir.path) else { continue }
             scanDirectory(dir, currentDepth: 1, maxDepth: maxDepth, results: &results, seenPaths: &seenPaths)
         }
@@ -103,14 +165,14 @@ public final class AppLauncher: @unchecked Sendable {
         // Sort alphabetically by clean name
         results.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
 
-        lock.lock()
-        self.cachedApps = results
-        self.lastScanTime = Date()
-        lock.unlock()
-
         Logger.shared.info("Scanned \(results.count) applications", subsystem: "Titik.AppLauncher")
         return results
     }
+
+    private let ignoredFolderNames: Set<String> = [
+        ".git", ".build", "node_modules", "DerivedData", ".Trash", "Caches", "tmp", "temp",
+        "Frameworks", "PlugIns", "SharedSupport", "XPCServices", "Resources"
+    ]
 
     private func scanDirectory(_ directory: URL, currentDepth: Int, maxDepth: Int, results: inout [AppInfo], seenPaths: inout Set<String>) {
         guard currentDepth <= maxDepth else { return }
@@ -124,12 +186,15 @@ public final class AppLauncher: @unchecked Sendable {
 
         for url in contents {
             let path = url.path
+            let filename = url.lastPathComponent
+            if ignoredFolderNames.contains(filename) { continue }
+
             if path.hasSuffix(".app") {
                 if !seenPaths.contains(path) {
                     seenPaths.insert(path)
                     let name = url.deletingPathExtension().lastPathComponent
-                    let icon = NSWorkspace.shared.icon(forFile: path)
-                    results.append(AppInfo(name: name, bundleURL: url, icon: icon))
+                    let appIcon = icon(forPath: path)
+                    results.append(AppInfo(name: name, bundleURL: url, icon: appIcon))
                 }
                 // Do NOT descend into the .app bundle directory itself!
                 continue
@@ -138,22 +203,74 @@ public final class AppLauncher: @unchecked Sendable {
             // If it is a directory and not a package, recurse
             var isDir: ObjCBool = false
             if fileManager.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue {
+                if let isPkg = (try? url.resourceValues(forKeys: [.isPackageKey]))?.isPackage, isPkg {
+                    continue
+                }
                 scanDirectory(url, currentDepth: currentDepth + 1, maxDepth: maxDepth, results: &results, seenPaths: &seenPaths)
             }
         }
     }
 
-    public func getApplications() -> [AppInfo] {
-        lock.lock()
-        defer { lock.unlock() }
-
-        if cachedApps.isEmpty {
-            lock.unlock()
-            let apps = scanApplications()
-            lock.lock()
+    public func getApplicationsAsync() async -> [AppInfo] {
+        if let apps = getCachedApps() {
             return apps
         }
-        return cachedApps
+        let task = getOrStartScanTask()
+        return await task.value
+    }
+
+    public func getApplications() -> [AppInfo] {
+        if let apps = getCachedApps() {
+            return apps
+        }
+        return scanApplications()
+    }
+
+    public func searchApplications(query: String) -> [SearchItem] {
+        let apps = getApplications()
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return apps.map { app in
+                SearchItem(
+                    id: "app:\(app.bundleURL.path)",
+                    title: app.name,
+                    subtitle: app.path,
+                    category: .application,
+                    score: 50,
+                    icon: app.icon,
+                    actionPayload: app.path,
+                    autocompletePayload: app.name,
+                    action: { [path = app.path] in
+                        AppLauncher.shared.launchApp(at: path)
+                    }
+                )
+            }
+        }
+
+        var results: [SearchItem] = []
+        for app in apps {
+            if let match = FuzzyMatcher.match(query: trimmed, target: app.name) {
+                results.append(
+                    SearchItem(
+                        id: "app:\(app.bundleURL.path)",
+                        title: app.name,
+                        subtitle: app.path,
+                        category: .application,
+                        score: match.score + 50,
+                        icon: app.icon,
+                        actionPayload: app.path,
+                        matchedIndices: match.matchedIndices,
+                        autocompletePayload: app.name,
+                        action: { [path = app.path] in
+                            AppLauncher.shared.launchApp(at: path)
+                        }
+                    )
+                )
+            }
+        }
+
+        results.sort { $0.score > $1.score }
+        return results
     }
 
     @discardableResult
@@ -163,7 +280,7 @@ public final class AppLauncher: @unchecked Sendable {
         config.activates = true
 
         let semaphore = DispatchSemaphore(value: 0)
-        var success = false
+        nonisolated(unsafe) var success = false
 
         NSWorkspace.shared.openApplication(at: url, configuration: config) { app, error in
             if let error = error {

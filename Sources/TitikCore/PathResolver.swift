@@ -167,4 +167,14 @@ public enum PathResolver: Sendable {
             return parentParts.joined(separator: "/") + "/"
         }
     }
+
+    public static func isDirectory(_ path: String) -> Bool {
+        let expanded = expandPath(path)
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir) {
+            return isDir.boolValue
+        }
+        return false
+    }
 }
+

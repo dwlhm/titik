@@ -73,10 +73,25 @@ public struct RGBAColor: Equatable, Sendable {
 public final class ConfigLoader: @unchecked Sendable {
     public static let shared = ConfigLoader()
 
-    public var currentConfig: Config
+    private let lock = NSLock()
+    private var _currentConfig: Config
+    public var currentConfig: Config {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _currentConfig
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _currentConfig = newValue
+        }
+    }
+    public var configURL: URL?
 
-    public init(config: Config = Config()) {
-        self.currentConfig = config
+    public init(config: Config = Config(), configURL: URL? = nil) {
+        self._currentConfig = config
+        self.configURL = configURL
     }
 
     public static var userConfigPath: URL {
@@ -100,7 +115,7 @@ public final class ConfigLoader: @unchecked Sendable {
 
     @discardableResult
     public func load(from url: URL? = nil) -> Config {
-        let targetURL = url ?? (self === ConfigLoader.shared ? ConfigLoader.userConfigPath : nil)
+        let targetURL = url ?? self.configURL ?? (self === ConfigLoader.shared ? ConfigLoader.userConfigPath : nil)
         guard let targetURL else {
             return self.currentConfig
         }
@@ -138,17 +153,28 @@ public final class ConfigLoader: @unchecked Sendable {
 
     /// Persists currentConfig to ~/.config/titik/config.json atomically.
     /// - Throws: if directory creation or file write fails.
-    public func save() throws {
-        let url = ConfigLoader.userConfigPath
+    public func save(to url: URL? = nil) throws {
+        let targetURL = url ?? self.configURL ?? ConfigLoader.userConfigPath
         try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(),
+            at: targetURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(currentConfig)
-        try data.write(to: url, options: .atomic)
-        Logger.shared.info("Saved configuration to \(url.path)", subsystem: "Titik.Config")
+        try data.write(to: targetURL, options: .atomic)
+        Logger.shared.info("Saved configuration to \(targetURL.path)", subsystem: "Titik.Config")
+    }
+
+    /// Ensures that ~/.config/titik/config.json exists on disk, persisting currentConfig if missing.
+    /// - Returns: The file URL of the user configuration file.
+    /// - Throws: If directory creation or file write fails.
+    @discardableResult
+    public func ensureConfigFileExists() throws -> URL {
+        if !FileManager.default.fileExists(atPath: ConfigLoader.userConfigPath.path) {
+            try save(to: ConfigLoader.userConfigPath)
+        }
+        return ConfigLoader.userConfigPath
     }
 }
 

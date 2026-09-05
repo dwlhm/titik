@@ -252,7 +252,15 @@ public struct BehaviorsConfig: Codable, Equatable, Sendable {
 public struct PluginsConfig: Codable, Equatable, Sendable {
     public static let defaultRegistrations: [String: Bool] = [
         "titik.system.plugin": true,
-        "titik.builtin.emoji": true
+        "titik.builtin.app": true,
+        "titik.builtin.file": true,
+        "titik.builtin.clipboard": true,
+        "titik.builtin.system": true,
+        "titik.builtin.calculator": true,
+        "titik.builtin.emoji": true,
+        "titik.plugin.zen": true,
+        "titik.builtin.launcher": true,
+        "titik.builtin.shortcuts": true
     ]
 
     /// Maps plugin reverse-DNS ID to its enabled state.
@@ -301,6 +309,7 @@ public struct Config: Codable, Equatable, Sendable {
     public var layout: LayoutConfig
     public var behaviors: BehaviorsConfig
     public var plugins: PluginsConfig
+    public var shortcuts: [ShortcutConfig]
 
     enum CodingKeys: String, CodingKey {
         case window
@@ -310,6 +319,7 @@ public struct Config: Codable, Equatable, Sendable {
         case layout
         case behaviors
         case plugins
+        case shortcuts
     }
 
     public init(
@@ -319,7 +329,8 @@ public struct Config: Codable, Equatable, Sendable {
         theme: ThemeConfig = ThemeConfig(),
         layout: LayoutConfig = LayoutConfig(),
         behaviors: BehaviorsConfig = BehaviorsConfig(),
-        plugins: PluginsConfig = PluginsConfig()
+        plugins: PluginsConfig = PluginsConfig(),
+        shortcuts: [ShortcutConfig] = []
     ) {
         self.window = window
         self.animation = animation
@@ -328,6 +339,7 @@ public struct Config: Codable, Equatable, Sendable {
         self.layout = layout
         self.behaviors = behaviors
         self.plugins = plugins
+        self.shortcuts = shortcuts
     }
 
     public init(from decoder: Decoder) throws {
@@ -339,6 +351,131 @@ public struct Config: Codable, Equatable, Sendable {
         self.layout = try container.decodeIfPresent(LayoutConfig.self, forKey: .layout) ?? LayoutConfig()
         self.behaviors = try container.decodeIfPresent(BehaviorsConfig.self, forKey: .behaviors) ?? BehaviorsConfig()
         self.plugins = try container.decodeIfPresent(PluginsConfig.self, forKey: .plugins) ?? PluginsConfig()
+
+        // Resilient shortcuts decoding: skips malformed entries without failing overall config decoding
+        var decodedShortcuts: [ShortcutConfig] = []
+        if let list = try? container.decodeIfPresent([SafeShortcutDecoder].self, forKey: .shortcuts) {
+            decodedShortcuts = list.compactMap { $0.shortcut }
+        } else if let dict = try? container.decodeIfPresent([String: SafeShortcutDictDecoder].self, forKey: .shortcuts) {
+            decodedShortcuts = dict.values.compactMap { $0.shortcut }.sorted { $0.id < $1.id }
+        }
+        self.shortcuts = decodedShortcuts
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(window, forKey: .window)
+        try container.encode(animation, forKey: .animation)
+        try container.encode(hotkey, forKey: .hotkey)
+        try container.encode(theme, forKey: .theme)
+        try container.encode(layout, forKey: .layout)
+        try container.encode(behaviors, forKey: .behaviors)
+        try container.encode(plugins, forKey: .plugins)
+        try container.encode(shortcuts, forKey: .shortcuts)
     }
 }
+
+/// Helper wrapper that safely decodes a `ShortcutConfig` from a list and catches individual decoding errors.
+private struct SafeShortcutDecoder: Decodable {
+    let shortcut: ShortcutConfig?
+
+    init(from decoder: Decoder) throws {
+        do {
+            self.shortcut = try ShortcutConfig(from: decoder)
+        } catch {
+            Logger.shared.warn(
+                "Skipping malformed shortcut config entry: \(error.localizedDescription)",
+                subsystem: "Titik.Config"
+            )
+            self.shortcut = nil
+        }
+    }
+}
+
+/// Helper wrapper that safely decodes a dictionary entry for shortcuts:
+/// - Supports values that are full `ShortcutConfig` objects (e.g. `{"id": "toggle", ...}`).
+/// - Supports values that are simple command strings (e.g. `{"cmd+shift+k": "!zen"}`),
+///   creating a `ShortcutConfig` with key combination from key and target from value.
+private struct SafeShortcutDictDecoder: Decodable {
+    let shortcut: ShortcutConfig?
+
+    init(from decoder: Decoder) throws {
+        let dictKey = decoder.codingPath.last?.stringValue ?? ""
+
+        // 1. Value is full ShortcutConfig object
+        if let fullShortcut = try? ShortcutConfig(from: decoder) {
+            self.shortcut = fullShortcut
+            return
+        }
+
+        // 2. Value is an object where key combination comes from dictionary key if not present in object
+        if let container = try? decoder.container(keyedBy: ShortcutConfig.CodingKeys.self) {
+            let (key, mods) = ShortcutConfig.parseKeyCombinationString(dictKey)
+            if !key.isEmpty {
+                let name = try? container.decodeIfPresent(String.self, forKey: .name)
+                let mode = try? container.decodeIfPresent(ShortcutExecutionMode.self, forKey: .mode)
+                let action: ShortcutActionConfig?
+                if container.contains(.action) {
+                    action = try? container.decode(ShortcutActionConfig.self, forKey: .action)
+                } else if let cmd = try? container.decodeIfPresent(String.self, forKey: .command) {
+                    let trimmed = cmd.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let type: ShortcutActionType = (trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://")) ? .quickLink : .rawQuery
+                    action = ShortcutActionConfig(type: type, target: trimmed)
+                } else if let target = try? container.decodeIfPresent(String.self, forKey: .target) {
+                    let trimmed = target.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let type: ShortcutActionType = (trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://")) ? .quickLink : .rawQuery
+                    action = ShortcutActionConfig(type: type, target: trimmed)
+                } else if let query = try? container.decodeIfPresent(String.self, forKey: .query) {
+                    let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let type: ShortcutActionType = (trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://")) ? .quickLink : .rawQuery
+                    action = ShortcutActionConfig(type: type, target: trimmed)
+                } else if let url = try? container.decodeIfPresent(String.self, forKey: .url) {
+                    let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+                    action = ShortcutActionConfig(type: .quickLink, target: trimmed)
+                } else {
+                    action = nil
+                }
+
+                if let action = action {
+                    let id = (try? container.decodeIfPresent(String.self, forKey: .id)) ?? "\(mods.joined(separator: "_"))_\(key)"
+                    self.shortcut = ShortcutConfig(
+                        id: id,
+                        name: name,
+                        key: key,
+                        modifiers: mods,
+                        mode: mode,
+                        action: action
+                    )
+                    return
+                }
+            }
+        }
+
+        // 3. Value is a simple command string, key is key combination
+        if let single = try? decoder.singleValueContainer(),
+           let commandString = try? single.decode(String.self) {
+            let trimmed = commandString.trimmingCharacters(in: .whitespacesAndNewlines)
+            let type: ShortcutActionType = (trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://")) ? .quickLink : .rawQuery
+            let action = ShortcutActionConfig(type: type, target: trimmed)
+            let (key, mods) = ShortcutConfig.parseKeyCombinationString(dictKey)
+            if !key.isEmpty {
+                let id = "\(mods.joined(separator: "_"))_\(key)"
+                self.shortcut = ShortcutConfig(
+                    id: id,
+                    key: key,
+                    modifiers: mods,
+                    action: action
+                )
+                return
+            }
+        }
+
+        Logger.shared.warn(
+            "Skipping malformed shortcut dictionary entry for key '\(dictKey)'",
+            subsystem: "Titik.Config"
+        )
+        self.shortcut = nil
+    }
+}
+
 

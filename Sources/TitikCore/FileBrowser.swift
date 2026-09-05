@@ -69,9 +69,14 @@ public final class FileBrowser: @unchecked Sendable {
         }
     }
 
-    public func determinePreviewType(for url: URL, isDirectory: Bool) -> PreviewType {
+    public func determinePreviewType(for url: URL, isDirectory: Bool, countItems: Bool = false) -> PreviewType {
         if isDirectory {
-            let count = (try? fileManager.contentsOfDirectory(atPath: url.path).filter { !$0.hasPrefix(".") }.count) ?? 0
+            let count: Int
+            if countItems {
+                count = (try? fileManager.contentsOfDirectory(atPath: url.path).filter { !$0.hasPrefix(".") }.count) ?? 0
+            } else {
+                count = 0
+            }
             return .directory(url, itemCount: count)
         }
 
@@ -282,17 +287,30 @@ public final class FileBrowser: @unchecked Sendable {
             return []
         }
 
-        guard let contents = try? fileManager.contentsOfDirectory(
+        var contentsURLs: [URL] = []
+        if let urls = try? fileManager.contentsOfDirectory(
             at: targetDirURL,
             includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey],
             options: [.skipsHiddenFiles]
-        ) else {
-            return []
+        ) {
+            contentsURLs = urls
+        } else if let names = try? fileManager.contentsOfDirectory(atPath: targetDirURL.path) {
+            contentsURLs = names.map { targetDirURL.appendingPathComponent($0) }
+        } else {
+            if targetDirURL.path == fileManager.homeDirectoryForCurrentUser.path || targetDirURL.path == NSHomeDirectory() {
+                contentsURLs = FileBrowser.commonSearchDirectories.filter { $0.path != targetDirURL.path }
+            } else {
+                return []
+            }
+        }
+
+        if contentsURLs.isEmpty && (targetDirURL.path == fileManager.homeDirectoryForCurrentUser.path || targetDirURL.path == NSHomeDirectory()) {
+            contentsURLs = FileBrowser.commonSearchDirectories.filter { $0.path != targetDirURL.path }
         }
 
         var items: [SearchItem] = []
 
-        for url in contents {
+        for url in contentsURLs {
             let filename = url.lastPathComponent
             if filename.hasPrefix(".") { continue }
 
@@ -408,25 +426,31 @@ public final class FileBrowser: @unchecked Sendable {
     }
 
     public func searchFiles(query: String, directories: [URL]? = nil) -> [SearchItem] {
+        if Task.isCancelled { return [] }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
+
+        // If query length is less than 2 characters, optimize global search to avoid scanning deep directory trees
+        let maxDepth = trimmed.count < 2 ? 1 : 3
 
         let searchDirs = directories ?? FileBrowser.commonSearchDirectories
         var results: [SearchItem] = []
         var seenPaths = Set<String>()
 
         for dir in searchDirs {
+            if Task.isCancelled { break }
             scanAndMatch(
                 directory: dir,
                 query: trimmed,
                 currentDepth: 1,
-                maxDepth: 3,
+                maxDepth: maxDepth,
                 results: &results,
                 seenPaths: &seenPaths
             )
-            if results.count >= 50 { break }
+            if results.count >= 50 || Task.isCancelled { break }
         }
 
+        if Task.isCancelled { return [] }
         results.sort { $0.score > $1.score }
         return Array(results.prefix(40))
     }
@@ -439,6 +463,7 @@ public final class FileBrowser: @unchecked Sendable {
         results: inout [SearchItem],
         seenPaths: inout Set<String>
     ) {
+        if Task.isCancelled { return }
         guard currentDepth <= maxDepth else { return }
 
         let ignoredFolders: Set<String> = [
@@ -452,6 +477,7 @@ public final class FileBrowser: @unchecked Sendable {
         ) else { return }
 
         for url in contents {
+            if Task.isCancelled { return }
             let filename = url.lastPathComponent
             let path = url.path
 
@@ -466,12 +492,12 @@ public final class FileBrowser: @unchecked Sendable {
             let isDirectory = isDir.boolValue
 
             if let match = FuzzyMatcher.match(query: query, target: filename) {
-                let previewType = determinePreviewType(for: url, isDirectory: isDirectory)
+                let previewType = determinePreviewType(for: url, isDirectory: isDirectory, countItems: false)
                 var subtitleParts: [String] = []
 
                 if isDirectory {
                     subtitleParts.append("Folder")
-                    if case .directory(_, let count) = previewType {
+                    if case .directory(_, let count) = previewType, count > 0 {
                         subtitleParts.append("\(count) items")
                     }
                 } else {
@@ -482,7 +508,7 @@ public final class FileBrowser: @unchecked Sendable {
 
                 subtitleParts.append(path)
                 let subtitle = subtitleParts.joined(separator: " • ")
-                let icon = NSWorkspace.shared.icon(forFile: path)
+                let icon = AppLauncher.shared.icon(forPath: path)
                 let category: SearchCategory = isDirectory ? .directory : .file
 
                 let autocompletePayload = isDirectory ? (filename.hasSuffix("/") ? filename : (filename + "/")) : filename
@@ -505,6 +531,7 @@ public final class FileBrowser: @unchecked Sendable {
                     }
                 )
                 results.append(item)
+                if results.count >= 50 { return }
             }
 
             if isDirectory && !path.hasSuffix(".app") {

@@ -57,16 +57,19 @@ public struct KeyModifier: OptionSet, Hashable, Sendable {
         for part in parts {
             let clean = part.trimmingCharacters(in: .whitespaces)
             switch clean {
-            case "cmd", "command", "super":
+            case "cmd", "command", "super", "meta", "win", "windows", "⌘":
                 mod.insert(.command)
-            case "alt", "opt", "option":
+            case "alt", "opt", "option", "⌥":
                 mod.insert(.option)
-            case "ctrl", "control":
+            case "ctrl", "control", "⌃":
                 mod.insert(.control)
-            case "shift":
+            case "shift", "⇧":
                 mod.insert(.shift)
             default:
-                break
+                if clean.contains("⌘") { mod.insert(.command) }
+                if clean.contains("⌥") { mod.insert(.option) }
+                if clean.contains("⌃") { mod.insert(.control) }
+                if clean.contains("⇧") { mod.insert(.shift) }
             }
         }
         return mod
