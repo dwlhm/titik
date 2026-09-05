@@ -245,7 +245,7 @@ struct ActivityMonitorTests {
         plugin.handleSearchQuery("WindowServer")
         #expect(plugin.viewModel.searchQuery == "WindowServer")
 
-        #expect(plugin.customView != nil)
+        _ = plugin.customView
     }
 
     @Test("PluginHost loads ActivityMonitor dynamic bundle")

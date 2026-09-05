@@ -116,7 +116,8 @@ let package = Package(
                 "TitikUI",
                 "TitikPluginKit",
                 "TitikPlugins",
-                "TitikParser"
+                "TitikParser",
+                "TitikPlatform"
             ]
         ),
         .testTarget(

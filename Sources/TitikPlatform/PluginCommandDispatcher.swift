@@ -441,7 +441,7 @@ public final class PluginCommandDispatcher: @unchecked Sendable {
                    normTitle == normalizedTarget ||
                    cmd.keywords.contains(where: { $0.lowercased().filter { $0.isLetter || $0.isNumber } == cleanTargetWithoutPrefix })
         }) {
-            let success = await MainActor.run {
+            await MainActor.run {
                 match.action()
             }
             return CommandExecutionResult.success(message: "Executed system command: \(match.title)")
