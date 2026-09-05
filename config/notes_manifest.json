@@ -1,0 +1,17 @@
+{
+  "id": "titik.plugin.notes",
+  "name": "Notes",
+  "icon": "📝",
+  "version": "1.0.0",
+  "sdkVersion": 2,
+  "description": "Flat-folder Markdown notes with live formatting and keyboard-first workflow",
+  "entrypoint": "NotesPlugin",
+  "triggers": [
+    "!note",
+    "!n"
+  ],
+  "permissions": [
+    "filesystem:read",
+    "filesystem:write"
+  ]
+}

@@ -1,5 +1,7 @@
 import Foundation
+import TitikCore
 import TitikParser
+import TitikPluginKit
 
 public enum MathEvaluatorError: Error, Equatable, LocalizedError {
     case divisionByZero
@@ -152,12 +154,12 @@ public enum MathEvaluator {
             return atan2(args[0], args[1])
 
         case "min":
-            guard !args.isEmpty else { throw MathEvaluatorError.invalidArgumentCount(funcName: name, expected: 1, got: 0) }
-            return args.min()!
+            guard let minimum = args.min() else { throw MathEvaluatorError.invalidArgumentCount(funcName: name, expected: 1, got: 0) }
+            return minimum
 
         case "max":
-            guard !args.isEmpty else { throw MathEvaluatorError.invalidArgumentCount(funcName: name, expected: 1, got: 0) }
-            return args.max()!
+            guard let maximum = args.max() else { throw MathEvaluatorError.invalidArgumentCount(funcName: name, expected: 1, got: 0) }
+            return maximum
 
         default:
             throw MathEvaluatorError.unknownFunction(name)
@@ -181,3 +183,139 @@ public enum MathEvaluator {
         return String(format: "%.10g", val)
     }
 }
+
+/// Built-in Calculator plugin evaluating arithmetic expressions, functions, and constants.
+public final class CalculatorPlugin: TitikCommandPlugin, TitikStreamingPlugin, TitikGlobalSearchProvider, @unchecked Sendable {
+    public static let id = "titik.builtin.calculator"
+    public static let name = "Calculator"
+    public static let version = "1.0.0"
+    public static let sdkVersion = titikSDKVersion
+
+    public let context: PluginContext
+
+    public var commands: [PluginCommandDefinition] {
+        [
+            PluginCommandDefinition(
+                id: "calculate",
+                name: "Calculate",
+                description: "Evaluates mathematical expressions",
+                triggers: ["calc", "calculate"],
+                arguments: [
+                    PluginCommandArgument(name: "expression", description: "Mathematical expression to evaluate", isRequired: true)
+                ],
+                defaultMode: .palette
+            )
+        ]
+    }
+
+    public required init(context: PluginContext) {
+        self.context = context
+    }
+
+    public func executeCommand(
+        invocation: PluginInvocation,
+        context: CommandExecutionContext
+    ) async throws -> CommandExecutionResult {
+        let expr = invocation.primaryValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !expr.isEmpty else {
+            return CommandExecutionResult.failure(message: "Missing expression argument")
+        }
+
+        if let result = CalculatorEngine.evaluate(expr) {
+            ClipboardManager.shared.copyToPasteboard(result.copyValue)
+            return CommandExecutionResult.success(
+                message: "\(expr) = \(result.title)",
+                outputPayload: [
+                    "expression": expr,
+                    "result": result.title,
+                    "copyValue": result.copyValue,
+                    "subtitle": result.subtitle
+                ]
+            )
+        }
+
+        return CommandExecutionResult.failure(message: "Invalid mathematical expression: \(expr)")
+    }
+
+    public func executeCommand(
+        id: String,
+        arguments: [String: String],
+        context: CommandExecutionContext
+    ) async throws -> CommandExecutionResult {
+        let primary = arguments["expression"] ?? arguments["payload"] ?? arguments["args"] ?? ""
+        let invocation = PluginInvocation(trigger: "calc", action: id, primaryValue: primary, rawInput: context.rawInput)
+        return try await executeCommand(invocation: invocation, context: context)
+    }
+
+    public func onQuery(invocation: PluginInvocation) async throws -> PluginCanvas {
+        try await onQuery(invocation.primaryValue)
+    }
+
+    public func onQuery(_ query: String) async throws -> PluginCanvas {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return .list([
+                PluginItem(
+                    id: "\(Self.id):hint",
+                    title: "!calc <expression>",
+                    subtitle: "Evaluate math expressions (e.g. 2+2, sqrt(144), 25 * 4)",
+                    category: "Calculator",
+                    actionPayload: "",
+                    scoreBoost: 500,
+                    pluginId: Self.id
+                )
+            ])
+        }
+
+        if let result = CalculatorEngine.evaluate(trimmed) {
+            return .list([
+                PluginItem(
+                    id: "\(Self.id):result",
+                    title: result.title,
+                    subtitle: "\(result.subtitle)  (Press Enter to copy)",
+                    category: "Calculator",
+                    actionPayload: result.copyValue,
+                    scoreBoost: 800,
+                    pluginId: Self.id
+                )
+            ])
+        }
+
+        return .list([])
+    }
+
+    public func provideGlobalSearchResults(query: String) async -> [PluginItem] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        if let result = CalculatorEngine.evaluate(trimmed) {
+            if !result.title.isEmpty && result.title != "Error" {
+                return [
+                    PluginItem(
+                        id: "\(Self.id):result",
+                        title: result.title,
+                        subtitle: "\(result.subtitle)  (Press Enter to copy)",
+                        category: "Calculator",
+                        actionPayload: result.copyValue,
+                        scoreBoost: 800,
+                        pluginId: Self.id
+                    )
+                ]
+            }
+        }
+        return []
+    }
+
+    public func cancelActiveStream() async {}
+    public func onShutdown() {}
+}
+
+public let calculatorPluginManifest = PluginManifest(
+    id: CalculatorPlugin.id,
+    name: CalculatorPlugin.name,
+    version: CalculatorPlugin.version,
+    sdkVersion: titikSDKVersion,
+    description: "Evaluate math expressions and calculations",
+    entrypoint: "CalculatorPlugin",
+    triggers: ["calc"]
+)

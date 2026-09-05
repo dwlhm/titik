@@ -1,10 +1,11 @@
 import Foundation
 import TitikCore
 import TitikPluginKit
+import TitikKeymap
 
 /// First-party plugin exposing the plugin management system via !plugin.
 /// Only supported command: !plugin reload
-public final class PluginSystemPlugin: TitikStreamingPlugin, @unchecked Sendable {
+public final class PluginSystemPlugin: TitikCommandPlugin, TitikStreamingPlugin, @unchecked Sendable {
     public static let id = "titik.system.plugin"
     public static let name = "Plugin System"
     public static let version = "1.0.0"
@@ -12,8 +13,49 @@ public final class PluginSystemPlugin: TitikStreamingPlugin, @unchecked Sendable
 
     public let context: PluginContext
 
+    public var commands: [PluginCommandDefinition] {
+        [
+            PluginCommandDefinition(
+                id: "reload",
+                name: "Reload Plugins",
+                description: "Reload and reindex all plugins from config and disk",
+                triggers: ["plugin", "reload"],
+                arguments: [],
+                defaultMode: .background
+            )
+        ]
+    }
+
     public required init(context: PluginContext) {
         self.context = context
+    }
+
+    public func executeCommand(
+        invocation: PluginInvocation,
+        context: CommandExecutionContext
+    ) async throws -> CommandExecutionResult {
+        await MainActor.run {
+            ShortcutManager.shared.reloadFromConfig()
+        }
+        return CommandExecutionResult.success(
+            message: "Plugins and shortcuts reloaded",
+            outputPayload: ["action": "reload"]
+        )
+    }
+
+    public func executeCommand(
+        id: String,
+        arguments: [String: String],
+        context: CommandExecutionContext
+    ) async throws -> CommandExecutionResult {
+        let invocation = PluginInvocation(
+            trigger: context.trigger,
+            action: id,
+            primaryValue: arguments["0"] ?? arguments["args"] ?? "",
+            flags: [:],
+            rawInput: context.rawInput
+        )
+        return try await executeCommand(invocation: invocation, context: context)
     }
 
     public func onQuery(_ query: String) async throws -> PluginCanvas {
@@ -56,5 +98,5 @@ public let pluginSystemManifest = PluginManifest(
     sdkVersion: titikSDKVersion,
     description: "Manage and reload Titik plugins",
     entrypoint: "PluginSystemPlugin",
-    triggers: ["!plugin"]
+    triggers: ["plugin"]
 )

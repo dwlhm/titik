@@ -17,6 +17,11 @@ mkdir -p "${MACOS}"
 mkdir -p "${RESOURCES}"
 mkdir -p "${PLUGINS}"
 
+if [ -d "${BIN_DIR}/plugins" ]; then
+    echo "==> Packaging dynamic plugins into ${PLUGINS}..."
+    cp -R "${BIN_DIR}/plugins/"*.bundle "${PLUGINS}/" 2>/dev/null || true
+fi
+
 if [ ! -f "${BIN_DIR}/titik" ]; then
     echo "ERROR: Executable ${BIN_DIR}/titik not found. Run 'make build' first." >&2
     exit 1
@@ -28,6 +33,9 @@ chmod +x "${MACOS}/titik"
 if [ -f "${BIN_DIR}/titik-worker" ]; then
     cp "${BIN_DIR}/titik-worker" "${MACOS}/titik-worker"
     chmod +x "${MACOS}/titik-worker"
+    if [ -f "${PROJECT_ROOT}/config/TitikWorker.entitlements" ]; then
+        codesign --entitlements "${PROJECT_ROOT}/config/TitikWorker.entitlements" -s - -f "${MACOS}/titik-worker" 2>/dev/null || true
+    fi
 fi
 
 if [ -f "${PROJECT_ROOT}/config/config.default.json" ]; then
@@ -69,6 +77,6 @@ cat > "${CONTENTS}/Info.plist" << 'EOF'
 </plist>
 EOF
 
-codesign -s - --force --deep "${APP_BUNDLE}" 2>/dev/null || true
+codesign -s - --force "${APP_BUNDLE}" 2>/dev/null || true
 
 echo "==> Titik.app created successfully at ${APP_BUNDLE}"

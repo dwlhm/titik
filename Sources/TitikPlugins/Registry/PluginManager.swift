@@ -10,11 +10,21 @@ public final class PluginManager: @unchecked Sendable {
 
     private let host: PluginHost
     private let configLoader: ConfigLoader
+    private let pluginsDirectory: URL?
     private let lock = NSLock()
 
-    public init(host: PluginHost = .shared, configLoader: ConfigLoader = .shared) {
+    public init(
+        host: PluginHost = .shared,
+        configLoader: ConfigLoader = .shared,
+        pluginsDirectory: URL? = nil
+    ) {
         self.host = host
         self.configLoader = configLoader
+        self.pluginsDirectory = pluginsDirectory
+    }
+
+    public convenience init(host: PluginHost = .shared, configLoader: ConfigLoader = .shared) {
+        self.init(host: host, configLoader: configLoader, pluginsDirectory: nil)
     }
 
     /// Re-reads config.json, rescans plugins folder, loads enabled plugins, unloads disabled ones.
@@ -54,11 +64,17 @@ public final class PluginManager: @unchecked Sendable {
         for (manifest, url) in discovered {
             let id = manifest.id
 
+            if seenIds.contains(id) {
+                continue
+            }
+
             // Validate filename convention
-            let expectedStem = url.deletingPathExtension().lastPathComponent
-            if expectedStem != id {
+            let stem = url.deletingPathExtension().lastPathComponent
+            let sanitizedName = manifest.name.replacingOccurrences(of: " ", with: "")
+            let matchesExpected = stem == id || stem == manifest.name || stem == sanitizedName || stem == manifest.entrypoint
+            if !matchesExpected {
                 Logger.shared.warn(
-                    "Plugin filename mismatch: expected '\(id).titikplugin', got '\(url.lastPathComponent)'. Loading anyway.",
+                    "Plugin filename mismatch: expected '\(id).bundle', got '\(url.lastPathComponent)'. Loading anyway.",
                     subsystem: "Titik.PluginManager"
                 )
             }
@@ -106,38 +122,81 @@ public final class PluginManager: @unchecked Sendable {
             results.append((manifest: entry.manifest, registeredEnabled: registrations[entry.id] ?? true))
         }
         for (manifest, _) in discoverBundles() {
-            results.append((manifest: manifest, registeredEnabled: registrations[manifest.id]))
+            results.append((manifest, registeredEnabled: registrations[manifest.id]))
         }
         return results
     }
 
     // MARK: - Private
 
-    /// Scans ~/.config/titik/plugins/ for .titikplugin bundles and parses their manifests.
+    /// Scans ~/.config/titik/plugins/ and Bundle.main.builtInPlugInsURL for .bundle and .titikplugin bundles and parses their manifests.
     private func discoverBundles() -> [(manifest: PluginManifest, url: URL)] {
-        let pluginsDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/titik/plugins")
+        let isRunningInTestProcess = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil ||
+            ProcessInfo.processInfo.environment["SWIFT_TESTING"] != nil ||
+            ProcessInfo.processInfo.arguments.contains(where: { $0.contains("xctest") || $0.contains("testing-helper") || $0.contains("TitikPackageTests") })
 
-        guard let contents = try? FileManager.default.contentsOfDirectory(
-            at: pluginsDir,
-            includingPropertiesForKeys: nil
-        ) else {
-            return []
+        var searchDirs: [URL] = []
+        if let customDir = pluginsDirectory {
+            searchDirs.append(customDir)
+        } else if !isRunningInTestProcess {
+            searchDirs.append(
+                FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent(".config/titik/plugins")
+            )
         }
 
+        let fileManager = FileManager.default
+        if let builtIn = Bundle.main.builtInPlugInsURL {
+            searchDirs.append(builtIn)
+        }
+
+        let exeURL = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
+        let appPluginsDir = exeURL.standardized.deletingLastPathComponent().appendingPathComponent("plugins")
+        if fileManager.fileExists(atPath: appPluginsDir.path) {
+            searchDirs.append(appPluginsDir)
+        }
+
+        var discoveredIds = Set<String>()
         var results: [(PluginManifest, URL)] = []
 
-        for url in contents where url.pathExtension == "titikplugin" {
-            let manifestURL = url.appendingPathComponent("manifest.json")
-            guard let data = try? Data(contentsOf: manifestURL) else {
-                Logger.shared.warn("Missing manifest.json in bundle: \(url.lastPathComponent)", subsystem: "Titik.PluginManager")
+        for dir in searchDirs {
+            guard let contents = try? fileManager.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: [.contentModificationDateKey]
+            ) else {
                 continue
             }
-            do {
-                let manifest = try PluginManifest.validate(jsonData: data)
-                results.append((manifest, url))
-            } catch {
-                Logger.shared.warn("Invalid manifest in \(url.lastPathComponent): \(error.localizedDescription)", subsystem: "Titik.PluginManager")
+
+            for url in contents where url.pathExtension == "bundle" || url.pathExtension == "titikplugin" {
+                var manifestURL = url.appendingPathComponent("Contents/Resources/manifest.json")
+                if !fileManager.fileExists(atPath: manifestURL.path) {
+                    manifestURL = url.appendingPathComponent("manifest.json")
+                }
+                guard let data = try? Data(contentsOf: manifestURL) else {
+                    Logger.shared.warn("Missing manifest.json in bundle: \(url.lastPathComponent)", subsystem: "Titik.PluginManager")
+                    continue
+                }
+                do {
+                    let manifest = try PluginManifest.validate(jsonData: data)
+                    if discoveredIds.contains(manifest.id) {
+                        if let existingIndex = results.firstIndex(where: { $0.0.id == manifest.id }) {
+                            let existingURL = results[existingIndex].1
+                            let existingDate = (try? existingURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date.distantPast
+                            let newDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date.distantPast
+                            if newDate > existingDate {
+                                Logger.shared.info("Replacing older bundle for plugin '\(manifest.id)' with newer bundle at \(url.path)", subsystem: "Titik.PluginManager")
+                                results[existingIndex] = (manifest, url)
+                            } else {
+                                Logger.shared.info("Skipping duplicate bundle for plugin '\(manifest.id)' at \(url.path)", subsystem: "Titik.PluginManager")
+                            }
+                        }
+                        continue
+                    }
+                    discoveredIds.insert(manifest.id)
+                    results.append((manifest, url))
+                } catch {
+                    Logger.shared.warn("Invalid manifest in \(url.lastPathComponent): \(error.localizedDescription)", subsystem: "Titik.PluginManager")
+                }
             }
         }
 

@@ -5,8 +5,11 @@ import TitikCore
 public struct SearchBarView: View {
     @Binding public var text: String
     public var placeholder: String
+    public var focusSignal: UUID?
     public var onSubmit: () -> Void
     public var onCancel: () -> Void
+
+    @FocusState private var isFocused: Bool
 
     private var ghostSuffix: String? {
         BangSuggestionHelper.suggestionSuffix(for: text)
@@ -15,11 +18,13 @@ public struct SearchBarView: View {
     public init(
         text: Binding<String>,
         placeholder: String = "Type a command or search...",
+        focusSignal: UUID? = nil,
         onSubmit: @escaping () -> Void = {},
         onCancel: @escaping () -> Void = {}
     ) {
         self._text = text
         self.placeholder = placeholder
+        self.focusSignal = focusSignal
         self.onSubmit = onSubmit
         self.onCancel = onCancel
     }
@@ -46,6 +51,7 @@ public struct SearchBarView: View {
                     .textFieldStyle(.plain)
                     .font(Theme.fontSearchInput)
                     .foregroundColor(Theme.textPrimary)
+                    .focused($isFocused)
                     .onSubmit {
                         onSubmit()
                     }
@@ -76,5 +82,8 @@ public struct SearchBarView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color.white.opacity(0.12), lineWidth: 1)
         )
+        .onChange(of: focusSignal) { _ in
+            isFocused = true
+        }
     }
 }

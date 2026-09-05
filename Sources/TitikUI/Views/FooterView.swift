@@ -5,17 +5,20 @@ public struct FooterView: View {
     public var isActionPaletteActive: Bool
     public var isCategoryDirectory: Bool
     public var canGoBack: Bool
+    public var pluginKeycaps: [KeycapAction]?
 
     public init(
         isPluginActive: Bool = false,
         isActionPaletteActive: Bool = false,
         isCategoryDirectory: Bool = false,
-        canGoBack: Bool = false
+        canGoBack: Bool = false,
+        pluginKeycaps: [KeycapAction]? = nil
     ) {
         self.isPluginActive = isPluginActive
         self.isActionPaletteActive = isActionPaletteActive
         self.isCategoryDirectory = isCategoryDirectory
         self.canGoBack = canGoBack
+        self.pluginKeycaps = pluginKeycaps
     }
 
     public var body: some View {
@@ -38,10 +41,11 @@ public struct FooterView: View {
                     KeycapView(shortcut: "↵", label: "Execute")
                     KeycapView(shortcut: "↑↓", label: "Navigate")
                     KeycapView(shortcut: "esc", label: "Dismiss")
+                } else if let keycaps = pluginKeycaps {
+                    ForEach(keycaps, id: \.self) { action in
+                        KeycapView(shortcut: action.shortcut, label: action.label)
+                    }
                 } else if isPluginActive {
-                    KeycapView(shortcut: "↵", label: "Paste")
-                    KeycapView(shortcut: "⇥", label: "Category")
-                    KeycapView(shortcut: "←↑↓→", label: "Select")
                     KeycapView(shortcut: "esc", label: "Close")
                 } else {
                     if canGoBack {

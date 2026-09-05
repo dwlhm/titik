@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import TitikCore
 import TitikPluginKit
 
@@ -71,7 +72,10 @@ public final class PluginHost: @unchecked Sendable {
 
     public func loadPlugin(at path: String) -> Bool {
         let url = URL(fileURLWithPath: path)
-        if url.pathExtension == "titikplugin" || url.pathExtension == "bundle" || FileManager.default.fileExists(atPath: url.appendingPathComponent("manifest.json").path) {
+        let isBundle = url.pathExtension == "titikplugin" || url.pathExtension == "bundle"
+        let hasManifest = FileManager.default.fileExists(atPath: url.appendingPathComponent("manifest.json").path)
+            || FileManager.default.fileExists(atPath: url.appendingPathComponent("Contents/Resources/manifest.json").path)
+        if isBundle || hasManifest {
             do {
                 _ = try loadNativePluginBundle(at: url)
                 return true
@@ -88,14 +92,15 @@ public final class PluginHost: @unchecked Sendable {
 
     public func loadNativePluginBundle(at bundleURL: URL) throws -> any TitikPlugin {
         let fileManager = FileManager.default
+        // 1. Check bundle directory existence
         guard fileManager.fileExists(atPath: bundleURL.path) else {
             throw PluginError.invalidManifest("Bundle path does not exist: \(bundleURL.path)")
         }
 
-        // 1. Locate and parse manifest.json
-        var manifestURL = bundleURL.appendingPathComponent("manifest.json")
+        // 2. Locate and parse manifest.json: check Contents/Resources/manifest.json first, then fallback to root
+        var manifestURL = bundleURL.appendingPathComponent("Contents/Resources/manifest.json")
         if !fileManager.fileExists(atPath: manifestURL.path) {
-            manifestURL = bundleURL.appendingPathComponent("Contents/Resources/manifest.json")
+            manifestURL = bundleURL.appendingPathComponent("manifest.json")
         }
         guard fileManager.fileExists(atPath: manifestURL.path) else {
             throw PluginError.invalidManifest("Missing manifest.json in bundle at \(bundleURL.path)")
@@ -104,25 +109,77 @@ public final class PluginHost: @unchecked Sendable {
         let manifestData = try Data(contentsOf: manifestURL)
         let manifest = try PluginManifest.validate(jsonData: manifestData)
 
-        // 2. Load bundle binary
+        lock.lock()
+        if let existing = nativePlugins[manifest.id] {
+            lock.unlock()
+            Logger.shared.info("Plugin '\(manifest.id)' is already loaded. Returning existing instance.", subsystem: "Titik.PluginHost")
+            return existing.plugin
+        }
+        lock.unlock()
+
+        // 3. Validate bundle structure
         let bundle = Bundle(url: bundleURL) ?? Bundle(path: bundleURL.path)
-        if let b = bundle, !b.isLoaded, b.executableURL != nil {
-            guard b.load() else {
-                throw PluginError.runtimeCrash("Failed to load bundle binary at \(bundleURL.path)")
+        let bundleName = bundleURL.deletingPathExtension().lastPathComponent
+        let executableURL: URL? = {
+            if let exec = bundle?.executableURL { return exec }
+            let candidate = bundleURL.appendingPathComponent("Contents/MacOS/\(bundleName)")
+            if fileManager.fileExists(atPath: candidate.path) { return candidate }
+            return nil
+        }()
+
+        // 4. Code signature check
+        if let execURL = executableURL {
+            var staticCode: SecStaticCode?
+            let status = SecStaticCodeCreateWithPath(execURL as CFURL, SecCSFlags(rawValue: 0), &staticCode)
+            if status == errSecSuccess, let code = staticCode {
+                let validityStatus = SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSBasicValidateOnly), nil)
+                if validityStatus == errSecSuccess {
+                    Logger.shared.debug("Code signature valid for \(bundleURL.lastPathComponent)", subsystem: "Titik.PluginHost")
+                } else if validityStatus == errSecCSUnsigned {
+                    Logger.shared.debug("Ad-hoc/unsigned code signature permitted in development: \(bundleURL.lastPathComponent)", subsystem: "Titik.PluginHost")
+                } else {
+                    Logger.shared.warn("Code signature verification warning/failure (\(validityStatus)) for \(bundleURL.path)", subsystem: "Titik.PluginHost")
+                }
             }
         }
 
-        // 3. Resolve entrypoint / principal class
+        // 5. Load bundle binary
+        if let b = bundle, !b.isLoaded, b.executableURL != nil || executableURL != nil {
+            let classAlreadyAvailable = NSClassFromString(manifest.entrypoint) != nil ||
+                NSClassFromString("\(bundleName).\(manifest.entrypoint)") != nil ||
+                (b.bundleIdentifier.flatMap { NSClassFromString("\($0).\(manifest.entrypoint)") } != nil)
+            if !classAlreadyAvailable {
+                guard b.load() else {
+                    throw PluginError.runtimeCrash("Failed to load bundle binary at \(bundleURL.path)")
+                }
+            }
+        }
+
+        // 6. Resolve principal class:
+        // 1: bundle.classNamed(manifest.entrypoint)
+        // 2: Namespaced "\(bundleName).\(manifest.entrypoint)"
+        // 3: Namespaced "\(bundleIdentifier).\(manifest.entrypoint)"
+        // 4: NSClassFromString(manifest.entrypoint)
+        // 5: Info.plist NSPrincipalClass
+        // 6: bundle.principalClass fallback
         var resolvedClass: AnyClass? = bundle?.classNamed(manifest.entrypoint)
         if resolvedClass == nil {
-            resolvedClass = NSClassFromString(manifest.entrypoint)
+            resolvedClass = NSClassFromString("\(bundleName).\(manifest.entrypoint)")
         }
         if resolvedClass == nil, let bundleId = bundle?.bundleIdentifier {
             resolvedClass = NSClassFromString("\(bundleId).\(manifest.entrypoint)")
         }
         if resolvedClass == nil {
-            let bundleName = bundleURL.deletingPathExtension().lastPathComponent
-            resolvedClass = NSClassFromString("\(bundleName).\(manifest.entrypoint)")
+            resolvedClass = NSClassFromString(manifest.entrypoint)
+        }
+        if resolvedClass == nil, let principalName = bundle?.object(forInfoDictionaryKey: "NSPrincipalClass") as? String {
+            resolvedClass = bundle?.classNamed(principalName)
+                ?? NSClassFromString(principalName)
+                ?? (bundle?.bundleIdentifier.flatMap { NSClassFromString("\($0).\(principalName)") })
+                ?? NSClassFromString("\(bundleName).\(principalName)")
+        }
+        if resolvedClass == nil {
+            resolvedClass = bundle?.principalClass
         }
 
         guard let targetClass = resolvedClass else {
@@ -133,11 +190,11 @@ public final class PluginHost: @unchecked Sendable {
             throw PluginError.nonConformingPrincipalClass(manifest.entrypoint)
         }
 
-        // 4. Instantiate with scoped context
+        // 7. Instantiate plugin with PluginContext(pluginId: manifest.id)
         let context = PluginContext(pluginId: manifest.id)
         let instance = pluginType.init(context: context)
 
-        // 5. Register in host registry and sync with worker supervisor if configured
+        // 8. Register native plugin
         registerNativePlugin(instance, manifest: manifest, bundle: bundle)
 
         if let supervisor = supervisor {
@@ -243,34 +300,69 @@ public final class PluginHost: @unchecked Sendable {
         let requestId = UUID()
         let stream = AsyncStream<IPCResponse> { continuation in
             let localPlugin = self.getNativePlugin(id: pluginId)
-            guard let plugin = localPlugin as? (any TitikStreamingPlugin) else {
-                continuation.yield(.queryError(requestId: requestId, error: "Plugin '\(pluginId)' not found or not streaming"))
-                continuation.finish()
-                return
-            }
-
-            Task {
-                do {
-                    let canvas = try await plugin.onQuery(query)
-                    switch canvas {
-                    case .streaming(let emitter):
-                        let events = await emitter.stream()
-                        var emittedFinished = false
-                        for await event in events {
-                            if case .finished = event { emittedFinished = true }
-                            continuation.yield(.streamEvent(requestId: requestId, event: event))
+            if let plugin = localPlugin as? (any TitikStreamingPlugin) {
+                Task {
+                    do {
+                        let canvas = try await plugin.onQuery(query)
+                        switch canvas {
+                        case .streaming(let emitter):
+                            let events = await emitter.stream()
+                            var emittedFinished = false
+                            for await event in events {
+                                if case .finished = event { emittedFinished = true }
+                                continuation.yield(.streamEvent(requestId: requestId, event: event))
+                            }
+                            if !emittedFinished {
+                                continuation.yield(.streamEvent(requestId: requestId, event: .finished))
+                            }
+                        case .list(let items):
+                            continuation.yield(.listResult(requestId: requestId, items: items))
+                        case .empty, .customView:
+                            continuation.yield(.listResult(requestId: requestId, items: []))
                         }
-                        if !emittedFinished {
-                            continuation.yield(.streamEvent(requestId: requestId, event: .finished))
-                        }
-                    case .list(let items):
-                        continuation.yield(.listResult(requestId: requestId, items: items))
-                    case .empty, .customView:
-                        continuation.yield(.listResult(requestId: requestId, items: []))
+                    } catch {
+                        continuation.yield(.queryError(requestId: requestId, error: error.localizedDescription))
                     }
-                } catch {
-                    continuation.yield(.queryError(requestId: requestId, error: error.localizedDescription))
+                    continuation.finish()
                 }
+            } else if let cmdPlugin = localPlugin as? (any TitikCommandPlugin) {
+                let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                let items: [PluginItem]
+                if trimmed.isEmpty {
+                    items = cmdPlugin.commands.map { cmd in
+                        PluginItem(
+                            id: "\(pluginId):\(cmd.id)",
+                            title: cmd.name,
+                            subtitle: cmd.description,
+                            category: "Plugin",
+                            actionPayload: cmd.id,
+                            scoreBoost: 500,
+                            pluginId: pluginId
+                        )
+                    }
+                } else {
+                    let matching = cmdPlugin.commands.filter {
+                        $0.id.localizedCaseInsensitiveContains(trimmed) ||
+                        $0.name.localizedCaseInsensitiveContains(trimmed) ||
+                        $0.description.localizedCaseInsensitiveContains(trimmed)
+                    }
+                    let chosen = matching.isEmpty ? cmdPlugin.commands : matching
+                    items = chosen.map { cmd in
+                        PluginItem(
+                            id: "\(pluginId):\(cmd.id)",
+                            title: cmd.name,
+                            subtitle: cmd.description,
+                            category: "Plugin",
+                            actionPayload: cmd.id,
+                            scoreBoost: 500,
+                            pluginId: pluginId
+                        )
+                    }
+                }
+                continuation.yield(.listResult(requestId: requestId, items: items))
+                continuation.finish()
+            } else {
+                continuation.yield(.queryError(requestId: requestId, error: "Plugin '\(pluginId)' not found or not streaming"))
                 continuation.finish()
             }
         }

@@ -94,9 +94,18 @@ public enum PluginCanvas: @unchecked Sendable {
 
 public protocol TitikStreamingPlugin: TitikPlugin {
     func onQuery(_ query: String) async throws -> PluginCanvas
+    func onQuery(invocation: PluginInvocation) async throws -> PluginCanvas
     func cancelActiveStream() async
 }
 
 public extension TitikStreamingPlugin {
+    func onQuery(invocation: PluginInvocation) async throws -> PluginCanvas {
+        try await onQuery(invocation.primaryValue)
+    }
+
+    func onQuery(_ query: String) async throws -> PluginCanvas {
+        return .empty
+    }
+
     func cancelActiveStream() async {}
 }

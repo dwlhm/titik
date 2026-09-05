@@ -1,16 +1,53 @@
 import Foundation
 import Dispatch
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 import TitikCore
 import TitikPluginKit
 import TitikPlugins
 
+Logger.shared.logHandler = { msg in
+    if let data = (msg + "\n").data(using: .utf8) {
+        FileHandle.standardError.write(data)
+    }
+}
+
 signal(SIGPIPE, SIG_IGN)
 
+// Set 2GB address space soft/hard limit to prevent memory exhaustion attacks
+var memLimit = rlimit(rlim_cur: 2 * 1024 * 1024 * 1024, rlim_max: 2 * 1024 * 1024 * 1024)
+setrlimit(RLIMIT_AS, &memLimit)
+
+// Parse optional --plugin-id <id> argument to isolate storage sandbox
+var isolatedPluginId: String?
+let args = CommandLine.arguments
+if let idx = args.firstIndex(of: "--plugin-id"), idx + 1 < args.count {
+    isolatedPluginId = args[idx + 1]
+}
+
+if let pluginId = isolatedPluginId {
+    let sandboxDir = ("~/.config/titik/sandboxes/\(pluginId)" as NSString).expandingTildeInPath
+    do {
+        try FileManager.default.createDirectory(atPath: sandboxDir, withIntermediateDirectories: true)
+        setenv("TMPDIR", sandboxDir, 1)
+    } catch {
+        setenv("TMPDIR", NSTemporaryDirectory(), 1)
+    }
+}
+
 final class WorkerDispatcher: @unchecked Sendable {
+    private let pluginId: String?
     private let host = PluginHost()
     private let writer = IPCMessageWriter(handle: FileHandle.standardOutput)
     private var activeQueryTasks: [UUID: Task<Void, Never>] = [:]
     private let lock = NSLock()
+
+    init(pluginId: String? = nil) {
+        self.pluginId = pluginId
+    }
 
     private func withLock<T>(_ work: () throws -> T) rethrows -> T {
         lock.lock()
@@ -125,5 +162,5 @@ final class WorkerDispatcher: @unchecked Sendable {
     }
 }
 
-let dispatcher = WorkerDispatcher()
+let dispatcher = WorkerDispatcher(pluginId: isolatedPluginId)
 dispatcher.run()

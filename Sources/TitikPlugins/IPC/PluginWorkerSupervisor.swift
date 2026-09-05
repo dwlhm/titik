@@ -6,19 +6,17 @@ public final class PluginWorkerSupervisor: @unchecked Sendable {
     public static let shared = PluginWorkerSupervisor()
 
     private let lock = NSLock()
-    private var process: Process?
-    private var writer: IPCMessageWriter?
-    private var stdinPipe: Pipe?
-    private var stdoutPipe: Pipe?
+    private var workers: [String: PluginWorkerInstance] = [:]
+    private var startingTasks: [String: Task<PluginWorkerInstance, Error>] = [:]
+    private var registeredPlugins: [String: (bundlePath: String?, manifestData: Data?)] = [:]
 
     private var continuations: [UUID: AsyncStream<IPCResponse>.Continuation] = [:]
-    private var handshakeContinuation: CheckedContinuation<Bool, Error>?
+    private var queryToPlugin: [UUID: String] = [:]
     private var loadContinuations: [String: CheckedContinuation<Bool, Error>] = [:]
 
-    private var registeredPlugins: [String: (bundlePath: String, manifestData: Data)] = [:]
     private var customBinaryURL: URL?
-    private var isStarting = false
     private var isShuttingDown = false
+    private var mockWriter: IPCMessageWriter?
 
     public init(customBinaryURL: URL? = nil) {
         self.customBinaryURL = customBinaryURL
@@ -28,6 +26,40 @@ public final class PluginWorkerSupervisor: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return try work()
+    }
+
+    public static func defaultWorkerEnvironment() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        let developerDir: String = {
+            if let envDevDir = env["DEVELOPER_DIR"], !envDevDir.isEmpty, FileManager.default.fileExists(atPath: envDevDir) {
+                return envDevDir
+            }
+            if FileManager.default.fileExists(atPath: "/Library/Developer/CommandLineTools") {
+                return "/Library/Developer/CommandLineTools"
+            }
+            if FileManager.default.fileExists(atPath: "/Applications/Xcode.app/Contents/Developer") {
+                return "/Applications/Xcode.app/Contents/Developer"
+            }
+            return "/Library/Developer/CommandLineTools"
+        }()
+
+        if env["DYLD_LIBRARY_PATH"] == nil {
+            let libPath = "\(developerDir)/Library/Developer/usr/lib"
+            if FileManager.default.fileExists(atPath: libPath) {
+                env["DYLD_LIBRARY_PATH"] = libPath
+            } else if FileManager.default.fileExists(atPath: "\(developerDir)/usr/lib") {
+                env["DYLD_LIBRARY_PATH"] = "\(developerDir)/usr/lib"
+            }
+        }
+        if env["DYLD_FRAMEWORK_PATH"] == nil {
+            let frameworkPath = "\(developerDir)/Library/Developer/Frameworks"
+            if FileManager.default.fileExists(atPath: frameworkPath) {
+                env["DYLD_FRAMEWORK_PATH"] = frameworkPath
+            } else if FileManager.default.fileExists(atPath: "\(developerDir)/Library/Frameworks") {
+                env["DYLD_FRAMEWORK_PATH"] = "\(developerDir)/Library/Frameworks"
+            }
+        }
+        return env
     }
 
     public static func findWorkerBinary(customURL: URL? = nil) -> URL? {
@@ -77,150 +109,166 @@ public final class PluginWorkerSupervisor: @unchecked Sendable {
 
     public var isWorkerRunning: Bool {
         withLock {
-            process?.isRunning == true && writer != nil
+            workers.values.contains { $0.isRunning } || mockWriter != nil
         }
     }
 
-    // MARK: - Lifecycle Management
+    public func isWorkerRunning(for pluginId: String) -> Bool {
+        withLock {
+            workers[pluginId]?.isRunning == true || mockWriter != nil
+        }
+    }
+
+    public func worker(for pluginId: String) -> PluginWorkerInstance? {
+        withLock { workers[pluginId] }
+    }
+
+    public var activeWorkers: [String: PluginWorkerInstance] {
+        withLock { workers }
+    }
+
+    // MARK: - Per-Plugin Worker Lifecycle Management
 
     public func start() async throws {
-        let shouldStart = withLock { () -> Bool in
-            if process?.isRunning == true || isStarting {
-                return false
+        let pluginsToStart = withLock {
+            Array(registeredPlugins.keys)
+        }
+        for pluginId in pluginsToStart {
+            _ = try await getOrCreateWorker(for: pluginId)
+        }
+    }
+
+    @discardableResult
+    public func getOrCreateWorker(
+        for pluginId: String,
+        bundlePath: String? = nil,
+        manifestData: Data? = nil
+    ) async throws -> PluginWorkerInstance {
+        // Record registration if provided
+        withLock {
+            if let bp = bundlePath, let md = manifestData {
+                registeredPlugins[pluginId] = (bundlePath: bp, manifestData: md)
+            } else if registeredPlugins[pluginId] == nil {
+                registeredPlugins[pluginId] = (bundlePath: nil, manifestData: nil)
             }
-            isStarting = true
-            isShuttingDown = false
-            return true
         }
 
-        guard shouldStart else { return }
-
-        defer {
-            withLock { isStarting = false }
+        // Fast path: Check existing running worker
+        let (existingWorker, inFlightTask, shuttingDown) = withLock { () -> (PluginWorkerInstance?, Task<PluginWorkerInstance, Error>?, Bool) in
+            if isShuttingDown {
+                return (nil, nil, true)
+            }
+            if let worker = workers[pluginId], worker.isRunning {
+                return (worker, nil, false)
+            }
+            return (nil, startingTasks[pluginId], false)
         }
 
-        guard let workerURL = Self.findWorkerBinary(customURL: customBinaryURL) else {
-            Logger.shared.error("titik-worker executable not found", subsystem: "Titik.WorkerSupervisor")
-            throw PluginError.runtimeCrash("titik-worker executable not found")
+        if shuttingDown {
+            throw PluginError.runtimeCrash("Supervisor is shutting down")
         }
 
-        let proc = Process()
-        proc.executableURL = workerURL
-        var env = ProcessInfo.processInfo.environment
-        let developerDir: String = {
-            if let envDevDir = env["DEVELOPER_DIR"], !envDevDir.isEmpty, FileManager.default.fileExists(atPath: envDevDir) {
-                return envDevDir
+        if let worker = existingWorker {
+            if let bp = bundlePath, let md = manifestData {
+                try await loadBundle(bundlePath: bp, manifestData: md, pluginId: pluginId, into: worker)
             }
-            if FileManager.default.fileExists(atPath: "/Library/Developer/CommandLineTools") {
-                return "/Library/Developer/CommandLineTools"
-            }
-            if FileManager.default.fileExists(atPath: "/Applications/Xcode.app/Contents/Developer") {
-                return "/Applications/Xcode.app/Contents/Developer"
-            }
-            return "/Library/Developer/CommandLineTools"
-        }()
-        if env["DYLD_LIBRARY_PATH"] == nil {
-            let libPath = "\(developerDir)/Library/Developer/usr/lib"
-            if FileManager.default.fileExists(atPath: libPath) {
-                env["DYLD_LIBRARY_PATH"] = libPath
-            } else if FileManager.default.fileExists(atPath: "\(developerDir)/usr/lib") {
-                env["DYLD_LIBRARY_PATH"] = "\(developerDir)/usr/lib"
-            }
+            return worker
         }
-        if env["DYLD_FRAMEWORK_PATH"] == nil {
-            let frameworkPath = "\(developerDir)/Library/Developer/Frameworks"
-            if FileManager.default.fileExists(atPath: frameworkPath) {
-                env["DYLD_FRAMEWORK_PATH"] = frameworkPath
-            } else if FileManager.default.fileExists(atPath: "\(developerDir)/Library/Frameworks") {
-                env["DYLD_FRAMEWORK_PATH"] = "\(developerDir)/Library/Frameworks"
-            }
+
+        if let task = inFlightTask {
+            return try await task.value
         }
-        proc.environment = env
 
-        let inPipe = Pipe()
-        let outPipe = Pipe()
-        proc.standardInput = inPipe
-        proc.standardOutput = outPipe
-        proc.standardError = FileHandle.standardError
+        // Spawn on-demand using deduplicated Task
+        let task = Task<PluginWorkerInstance, Error> { [weak self] in
+            guard let self = self else {
+                throw PluginError.runtimeCrash("Supervisor deallocated")
+            }
 
-        let msgWriter = IPCMessageWriter(handle: inPipe.fileHandleForWriting)
+            defer {
+                self.withLock {
+                    _ = self.startingTasks.removeValue(forKey: pluginId)
+                }
+            }
+
+            guard let workerURL = Self.findWorkerBinary(customURL: self.customBinaryURL) else {
+                Logger.shared.error("titik-worker executable not found", subsystem: "Titik.WorkerSupervisor")
+                throw PluginError.runtimeCrash("titik-worker executable not found")
+            }
+
+            let instance = try await PluginWorkerInstance.spawn(
+                pluginId: pluginId,
+                executableURL: workerURL,
+                environment: Self.defaultWorkerEnvironment()
+            )
+
+            instance.onMessage = { [weak self] workerInstance, response in
+                self?.handleIncomingResponse(response, from: workerInstance.pluginId)
+            }
+
+            instance.onTermination = { [weak self] workerInstance, exitCode in
+                self?.handleWorkerTermination(pluginId: workerInstance.pluginId, exitCode: exitCode)
+            }
+
+            self.withLock {
+                self.workers[pluginId] = instance
+            }
+
+            // Sync registered bundle if exists
+            let reg = self.withLock { self.registeredPlugins[pluginId] }
+            let bpToLoad = bundlePath ?? reg?.bundlePath
+            let mdToLoad = manifestData ?? reg?.manifestData
+
+            if let bp = bpToLoad, let md = mdToLoad {
+                try await self.loadBundle(bundlePath: bp, manifestData: md, pluginId: pluginId, into: instance)
+            }
+
+            Logger.shared.info(
+                "Worker daemon spawned & handshaked for '\(pluginId)' (PID: \(instance.pid))",
+                subsystem: "Titik.WorkerSupervisor"
+            )
+
+            return instance
+        }
 
         withLock {
-            self.process = proc
-            self.writer = msgWriter
-            self.stdinPipe = inPipe
-            self.stdoutPipe = outPipe
+            startingTasks[pluginId] = task
         }
 
-        proc.terminationHandler = { [weak self] p in
-            self?.handleProcessTermination(exitCode: p.terminationStatus)
-        }
+        return try await task.value
+    }
 
-        do {
-            try proc.run()
-        } catch {
-            Logger.shared.error("Failed to spawn titik-worker: \(error.localizedDescription)", subsystem: "Titik.WorkerSupervisor")
-            throw PluginError.runtimeCrash("Failed to spawn titik-worker: \(error.localizedDescription)")
-        }
-
-        // Start message reading directly on dedicated reader thread
-        _ = IPCTransport.startMessageReader(
-            from: outPipe.fileHandleForReading,
-            as: IPCResponse.self,
-            onMessage: { [weak self] response in
-                self?.handleIncomingResponse(response)
-            },
-            onEOF: { [weak self] in
-                self?.handleEOF()
-            }
-        )
-
-        // Perform handshake
+    private func loadBundle(
+        bundlePath: String,
+        manifestData: Data,
+        pluginId: String,
+        into worker: PluginWorkerInstance
+    ) async throws {
         _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
             withLock {
-                self.handshakeContinuation = continuation
+                self.loadContinuations[pluginId] = continuation
             }
 
             do {
-                try msgWriter.write(IPCRequest.handshake(sdkVersion: 2))
+                try worker.writer.write(IPCRequest.load(bundlePath: bundlePath, manifestData: manifestData))
             } catch {
                 withLock {
-                    self.handshakeContinuation = nil
+                    _ = self.loadContinuations.removeValue(forKey: pluginId)
                 }
                 continuation.resume(throwing: error)
             }
         }
-
-        // Re-load registered plugins after handshake
-        let pluginsToSync = withLock {
-            Array(registeredPlugins.values)
-        }
-
-        for plugin in pluginsToSync {
-            try? msgWriter.write(IPCRequest.load(bundlePath: plugin.bundlePath, manifestData: plugin.manifestData))
-        }
-
-        Logger.shared.info("Worker daemon started & handshaked successfully (PID: \(proc.processIdentifier))", subsystem: "Titik.WorkerSupervisor")
     }
 
-    private func handleIncomingResponse(_ response: IPCResponse) {
+    private func handleIncomingResponse(_ response: IPCResponse, from pluginId: String) {
         switch response {
-        case .handshakeAck(let sdkVersion, let success):
-            let continuation = withLock { () -> CheckedContinuation<Bool, Error>? in
-                let c = handshakeContinuation
-                handshakeContinuation = nil
-                return c
-            }
+        case .handshakeAck:
+            // Handshake is handled directly inside PluginWorkerInstance
+            break
 
-            if success && sdkVersion == 2 {
-                continuation?.resume(returning: true)
-            } else {
-                continuation?.resume(throwing: PluginError.incompatibleSDK(current: 2, required: sdkVersion))
-            }
-
-        case .loadResult(let pluginId, let success, let error):
+        case .loadResult(let loadedPluginId, let success, let error):
             let continuation = withLock {
-                loadContinuations.removeValue(forKey: pluginId)
+                loadContinuations.removeValue(forKey: loadedPluginId)
             }
 
             if success {
@@ -234,8 +282,10 @@ public final class PluginWorkerSupervisor: @unchecked Sendable {
                 let c = continuations[requestId]
                 if case .finished = event {
                     continuations.removeValue(forKey: requestId)
+                    queryToPlugin.removeValue(forKey: requestId)
                 } else if case .error = event {
                     continuations.removeValue(forKey: requestId)
+                    queryToPlugin.removeValue(forKey: requestId)
                 }
                 return c
             }
@@ -249,7 +299,8 @@ public final class PluginWorkerSupervisor: @unchecked Sendable {
 
         case .listResult(let requestId, _):
             let continuation = withLock {
-                continuations.removeValue(forKey: requestId)
+                queryToPlugin.removeValue(forKey: requestId)
+                return continuations.removeValue(forKey: requestId)
             }
 
             continuation?.yield(response)
@@ -257,7 +308,8 @@ public final class PluginWorkerSupervisor: @unchecked Sendable {
 
         case .queryError(let requestId, _):
             let continuation = withLock {
-                continuations.removeValue(forKey: requestId)
+                queryToPlugin.removeValue(forKey: requestId)
+                return continuations.removeValue(forKey: requestId)
             }
 
             continuation?.yield(response)
@@ -268,53 +320,46 @@ public final class PluginWorkerSupervisor: @unchecked Sendable {
         }
     }
 
-    private func handleProcessTermination(exitCode: Int32) {
-        let (shuttingDown, activeContinuations, pendingHandshake, pendingLoads) = withLock { () -> (Bool, [AsyncStream<IPCResponse>.Continuation], CheckedContinuation<Bool, Error>?, [CheckedContinuation<Bool, Error>]) in
+    private func handleWorkerTermination(pluginId: String, exitCode: Int32) {
+        let (affectedContinuations, pendingLoad, shouldRecover) = withLock { () -> ([AsyncStream<IPCResponse>.Continuation], CheckedContinuation<Bool, Error>?, Bool) in
             let shuttingDown = isShuttingDown
-            let activeContinuations = Array(continuations.values)
-            continuations.removeAll()
+            _ = workers.removeValue(forKey: pluginId)
 
-            let pendingHandshake = handshakeContinuation
-            handshakeContinuation = nil
+            var affected: [AsyncStream<IPCResponse>.Continuation] = []
+            let reqIdsForPlugin = queryToPlugin.compactMap { (reqId, pId) -> UUID? in
+                pId == pluginId ? reqId : nil
+            }
+            for reqId in reqIdsForPlugin {
+                if let cont = continuations.removeValue(forKey: reqId) {
+                    affected.append(cont)
+                }
+                queryToPlugin.removeValue(forKey: reqId)
+            }
 
-            let pendingLoads = Array(loadContinuations.values)
-            loadContinuations.removeAll()
+            let pendingLoad = loadContinuations.removeValue(forKey: pluginId)
+            let shouldRecover = !shuttingDown && (registeredPlugins[pluginId] != nil)
 
-            process = nil
-            writer = nil
-            stdinPipe = nil
-            stdoutPipe = nil
-
-            return (shuttingDown, activeContinuations, pendingHandshake, pendingLoads)
+            return (affected, pendingLoad, shouldRecover)
         }
 
-        // Fail inflight continuations
-        for c in activeContinuations {
+        // Fail inflight queries dedicated to this worker
+        for c in affectedContinuations {
             c.yield(.queryError(requestId: UUID(), error: "Worker process terminated (exit code: \(exitCode))"))
             c.finish()
         }
 
-        pendingHandshake?.resume(throwing: PluginError.runtimeCrash("Worker terminated before handshake"))
-        for l in pendingLoads {
-            l.resume(throwing: PluginError.runtimeCrash("Worker terminated before plugin load"))
-        }
+        pendingLoad?.resume(throwing: PluginError.runtimeCrash("Worker for '\(pluginId)' terminated before plugin load"))
 
-        if !shuttingDown {
-            Logger.shared.error("Worker process crashed with exit code \(exitCode). Triggering auto-recovery...", subsystem: "Titik.WorkerSupervisor")
+        if shouldRecover {
+            Logger.shared.error(
+                "Worker process for '\(pluginId)' crashed with exit code \(exitCode). Triggering auto-recovery...",
+                subsystem: "Titik.WorkerSupervisor"
+            )
             Task {
                 try? await Task.sleep(nanoseconds: 100_000_000) // 100ms backoff
-                try? await self.start()
+                let reg = self.withLock { self.registeredPlugins[pluginId] }
+                _ = try? await self.getOrCreateWorker(for: pluginId, bundlePath: reg?.bundlePath, manifestData: reg?.manifestData)
             }
-        }
-    }
-
-    private func handleEOF() {
-        let isRunning = withLock {
-            process?.isRunning == true
-        }
-
-        if isRunning {
-            handleProcessTermination(exitCode: -1)
         }
     }
 
@@ -324,47 +369,56 @@ public final class PluginWorkerSupervisor: @unchecked Sendable {
         let requestId = UUID()
 
         let stream = AsyncStream<IPCResponse> { continuation in
-            let w = withLock { () -> IPCMessageWriter? in
+            let (activeWorker, fallbackMock) = withLock { () -> (PluginWorkerInstance?, IPCMessageWriter?) in
                 self.continuations[requestId] = continuation
-                return self.writer
+                self.queryToPlugin[requestId] = pluginId
+                return (self.workers[pluginId], self.mockWriter)
             }
 
             continuation.onTermination = { [weak self] _ in
                 self?.cancelQuery(requestId: requestId)
             }
 
-            if let writer = w {
+            if let worker = activeWorker, worker.isRunning {
                 do {
-                    try writer.write(IPCRequest.query(requestId: requestId, pluginId: pluginId, query: query))
+                    try worker.writer.write(IPCRequest.query(requestId: requestId, pluginId: pluginId, query: query))
                 } catch {
                     continuation.yield(.queryError(requestId: requestId, error: error.localizedDescription))
                     continuation.finish()
                     self.withLock {
                         _ = self.continuations.removeValue(forKey: requestId)
+                        _ = self.queryToPlugin.removeValue(forKey: requestId)
+                    }
+                }
+            } else if let mock = fallbackMock {
+                do {
+                    try mock.write(IPCRequest.query(requestId: requestId, pluginId: pluginId, query: query))
+                } catch {
+                    continuation.yield(.queryError(requestId: requestId, error: error.localizedDescription))
+                    continuation.finish()
+                    self.withLock {
+                        _ = self.continuations.removeValue(forKey: requestId)
+                        _ = self.queryToPlugin.removeValue(forKey: requestId)
                     }
                 }
             } else {
-                // Ensure worker is running or try to start
+                // Ensure dedicated worker is running or spawn on-demand
                 Task { [weak self] in
                     guard let self = self else { return }
                     do {
-                        try await self.start()
-                        let activeWriter = self.withLock { self.writer }
-
-                        if let writer = activeWriter {
-                            try writer.write(IPCRequest.query(requestId: requestId, pluginId: pluginId, query: query))
-                        } else {
-                            continuation.yield(.queryError(requestId: requestId, error: "Worker process unavailable"))
-                            continuation.finish()
-                            self.withLock {
-                                _ = self.continuations.removeValue(forKey: requestId)
-                            }
-                        }
+                        let reg = self.withLock { self.registeredPlugins[pluginId] }
+                        let worker = try await self.getOrCreateWorker(
+                            for: pluginId,
+                            bundlePath: reg?.bundlePath,
+                            manifestData: reg?.manifestData
+                        )
+                        try worker.writer.write(IPCRequest.query(requestId: requestId, pluginId: pluginId, query: query))
                     } catch {
                         continuation.yield(.queryError(requestId: requestId, error: error.localizedDescription))
                         continuation.finish()
                         self.withLock {
                             _ = self.continuations.removeValue(forKey: requestId)
+                            _ = self.queryToPlugin.removeValue(forKey: requestId)
                         }
                     }
                 }
@@ -375,125 +429,125 @@ public final class PluginWorkerSupervisor: @unchecked Sendable {
     }
 
     public func cancelQuery(requestId: UUID) {
-        let (continuation, w) = withLock { () -> (AsyncStream<IPCResponse>.Continuation?, IPCMessageWriter?) in
-            (continuations.removeValue(forKey: requestId), writer)
+        let (continuation, writer) = withLock { () -> (AsyncStream<IPCResponse>.Continuation?, IPCMessageWriter?) in
+            let cont = continuations.removeValue(forKey: requestId)
+            let pluginId = queryToPlugin.removeValue(forKey: requestId)
+            let writer = pluginId.flatMap { workers[$0]?.writer } ?? mockWriter
+            return (cont, writer)
         }
 
         continuation?.finish()
-        if let writer = w {
+        if let writer = writer {
             try? writer.write(IPCRequest.cancelQuery(requestId: requestId))
         }
     }
 
     public func cancelAllQueries() {
-        let (ids, activeContinuations, w) = withLock { () -> ([UUID], [AsyncStream<IPCResponse>.Continuation], IPCMessageWriter?) in
-            let ids = Array(continuations.keys)
-            let activeContinuations = Array(continuations.values)
+        let (conts, pairs) = withLock { () -> ([AsyncStream<IPCResponse>.Continuation], [(UUID, IPCMessageWriter)]) in
+            let conts = Array(continuations.values)
+            var pairs: [(UUID, IPCMessageWriter)] = []
+            for (reqId, pid) in queryToPlugin {
+                if let writer = workers[pid]?.writer ?? mockWriter {
+                    pairs.append((reqId, writer))
+                }
+            }
             continuations.removeAll()
-            return (ids, activeContinuations, writer)
+            queryToPlugin.removeAll()
+            return (conts, pairs)
         }
 
-        for c in activeContinuations {
+        for c in conts {
             c.finish()
         }
 
-        if let writer = w {
-            for id in ids {
-                try? writer.write(IPCRequest.cancelQuery(requestId: id))
-            }
+        for (reqId, writer) in pairs {
+            try? writer.write(IPCRequest.cancelQuery(requestId: reqId))
         }
     }
 
     // MARK: - Plugin Registration & Sync
 
     public func loadPlugin(bundlePath: String, manifestData: Data, pluginId: String) async throws -> Bool {
-        let (running, w) = withLock { () -> (Bool, IPCMessageWriter?) in
-            registeredPlugins[pluginId] = (bundlePath: bundlePath, manifestData: manifestData)
-            return (process?.isRunning == true, writer)
-        }
-
-        if !running || w == nil {
-            try await start()
-        }
-
-        let activeWriter = try withLock { () -> IPCMessageWriter in
-            guard let writer = writer else {
-                throw PluginError.runtimeCrash("Worker is not running")
-            }
-            return writer
-        }
-
-        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
-            withLock {
-                self.loadContinuations[pluginId] = continuation
-            }
-
-            do {
-                try activeWriter.write(IPCRequest.load(bundlePath: bundlePath, manifestData: manifestData))
-            } catch {
-                withLock {
-                    _ = self.loadContinuations.removeValue(forKey: pluginId)
-                }
-                continuation.resume(throwing: error)
-            }
-        }
+        _ = try await getOrCreateWorker(for: pluginId, bundlePath: bundlePath, manifestData: manifestData)
+        return true
     }
 
     public func unloadPlugin(pluginId: String) {
-        let w = withLock { () -> IPCMessageWriter? in
+        let worker = withLock { () -> PluginWorkerInstance? in
             registeredPlugins.removeValue(forKey: pluginId)
-            return writer
+            return workers.removeValue(forKey: pluginId)
         }
 
-        if let writer = w {
-            try? writer.write(IPCRequest.unload(pluginId: pluginId))
+        if let w = worker {
+            try? w.writer.write(IPCRequest.unload(pluginId: pluginId))
+            w.shutdown()
         }
     }
 
-    public func terminateWorkerForTesting() {
+    // MARK: - Testing Utilities
+
+    public func terminateWorkerForTesting(pluginId: String? = nil) {
+        let workersToTerminate = withLock { () -> [PluginWorkerInstance] in
+            if let pid = pluginId, let w = workers[pid] {
+                return [w]
+            }
+            return Array(workers.values)
+        }
+        for w in workersToTerminate {
+            w.terminate()
+        }
+    }
+
+    public func injectResponseForTesting(_ response: IPCResponse, for pluginId: String? = nil) {
+        handleIncomingResponse(response, from: pluginId ?? "default")
+    }
+
+    public func handleProcessTerminationForTesting(exitCode: Int32, pluginId: String? = nil) {
+        if let pid = pluginId {
+            handleWorkerTermination(pluginId: pid, exitCode: exitCode)
+        } else {
+            let pluginsToTerminate = withLock { () -> Set<String> in
+                var p = Set(workers.keys)
+                for pid in queryToPlugin.values { p.insert(pid) }
+                if p.isEmpty { p.insert("default") }
+                return p
+            }
+            for pid in pluginsToTerminate {
+                handleWorkerTermination(pluginId: pid, exitCode: exitCode)
+            }
+        }
+    }
+
+    public func setWriterForTesting(_ writer: IPCMessageWriter, for pluginId: String = "default") {
         withLock {
-            process?.terminate()
+            self.mockWriter = writer
         }
     }
 
-    public func injectResponseForTesting(_ response: IPCResponse) {
-        handleIncomingResponse(response)
-    }
-
-    public func handleProcessTerminationForTesting(exitCode: Int32) {
-        handleProcessTermination(exitCode: exitCode)
-    }
-
-    public func setWriterForTesting(_ writer: IPCMessageWriter) {
-        withLock {
-            self.writer = writer
-        }
-    }
+    // MARK: - Shutdown
 
     public func shutdown() {
-        let (w, proc) = withLock { () -> (IPCMessageWriter?, Process?) in
+        let activeWorkers = withLock { () -> [PluginWorkerInstance] in
             isShuttingDown = true
-            let w = writer
-            let proc = process
-            continuations.removeAll()
+            let all = Array(workers.values)
+            workers.removeAll()
+            startingTasks.removeAll()
             registeredPlugins.removeAll()
-            process = nil
-            writer = nil
-            stdinPipe = nil
-            stdoutPipe = nil
-            return (w, proc)
+            continuations.removeAll()
+            queryToPlugin.removeAll()
+            loadContinuations.removeAll()
+            mockWriter = nil
+            return all
         }
 
-        if let writer = w {
-            try? writer.write(IPCRequest.shutdown)
-            writer.close()
+        for worker in activeWorkers {
+            worker.shutdown()
         }
 
-        if let p = proc, p.isRunning {
-            p.terminate()
-        }
-
-        Logger.shared.info("Worker supervisor shut down cleanly", subsystem: "Titik.WorkerSupervisor")
+        Logger.shared.info(
+            "Worker supervisor shut down cleanly (\(activeWorkers.count) workers)",
+            subsystem: "Titik.WorkerSupervisor"
+        )
     }
 
     deinit {

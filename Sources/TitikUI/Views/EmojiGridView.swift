@@ -47,6 +47,15 @@ public final class EmojiPlugin: ObservableObject, PluginUIRepresentable {
         AnyView(EmojiGridView(plugin: self))
     }
 
+    public var footerKeycaps: [KeycapAction]? {
+        [
+            KeycapAction(shortcut: "↵", label: "Paste"),
+            KeycapAction(shortcut: "⇥", label: "Category"),
+            KeycapAction(shortcut: "←↑↓→", label: "Select"),
+            KeycapAction(shortcut: "esc", label: "Close")
+        ]
+    }
+
     public init() {
         updateItems()
     }
@@ -151,43 +160,6 @@ public final class EmojiPlugin: ObservableObject, PluginUIRepresentable {
             return true
         }
         return false
-    }
-
-    public func handleKeyDown(event: NSEvent) -> Bool {
-        let code = UInt32(event.keyCode)
-
-        switch code {
-        case Keycode.tab.rawValue:
-            if event.modifierFlags.contains(.shift) {
-                previousCategory()
-            } else {
-                nextCategory()
-            }
-            return true
-
-        case Keycode.leftArrow.rawValue:
-            moveSelection(deltaX: -1, deltaY: 0, columns: 8)
-            return true
-
-        case Keycode.rightArrow.rawValue:
-            moveSelection(deltaX: 1, deltaY: 0, columns: 8)
-            return true
-
-        case Keycode.upArrow.rawValue:
-            moveSelection(deltaX: 0, deltaY: -1, columns: 8)
-            return true
-
-        case Keycode.downArrow.rawValue:
-            moveSelection(deltaX: 0, deltaY: 1, columns: 8)
-            return true
-
-        case Keycode.returnKey.rawValue:
-            executeSelected()
-            return true
-
-        default:
-            return false
-        }
     }
 }
 

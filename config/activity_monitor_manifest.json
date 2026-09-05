@@ -1,0 +1,19 @@
+{
+  "id": "titik.plugin.activitymonitor",
+  "name": "Activity Monitor",
+  "icon": "📊",
+  "version": "1.0.0",
+  "sdkVersion": 2,
+  "description": "System activity monitor and keyboard-first process manager",
+  "entrypoint": "ActivityMonitorPlugin",
+  "triggers": [
+    "!activity",
+    "!top",
+    "!ps",
+    "activity"
+  ],
+  "permissions": [
+    "process:signal",
+    "system:metrics"
+  ]
+}

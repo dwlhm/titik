@@ -22,6 +22,7 @@ public final class UIOrchestrator: ObservableObject {
     @Published public var boundaryBounceOffset: CGFloat = 0
     @Published public var activePluginUI: (any PluginUIRepresentable)? = nil
     @Published public var activeSession: DirectoryNavigationSession? = nil
+    @Published public var focusSearchBarSignal: UUID = UUID()
 
     @Published public var isActionPaletteVisible: Bool = false
     @Published public var selectedActionIndex: Int = 0
@@ -31,6 +32,7 @@ public final class UIOrchestrator: ObservableObject {
     private let fileBrowser: FileBrowser
     private let commandParser = CommandParser()
     private nonisolated(unsafe) var keyMonitor: Any?
+    private var activeSearchTask: Task<Void, Never>?
 
     public init(searchEngine: SearchEngine = .shared, fileBrowser: FileBrowser = .shared) {
         self.searchEngine = searchEngine
@@ -38,9 +40,13 @@ public final class UIOrchestrator: ObservableObject {
         WindowController.shared.onWindowClosed = {
             PluginHost.shared.cancelAllActiveTasks()
         }
-        PluginManager.shared.reindex()
         performSearch("")
         setupKeyMonitor()
+    }
+
+    @MainActor
+    public func focusSearchBar() {
+        focusSearchBarSignal = UUID()
     }
 
     @MainActor
@@ -74,6 +80,10 @@ public final class UIOrchestrator: ObservableObject {
     }
 
     public func performSearch(_ q: String) {
+        self.selectedIndex = 0
+        activeSearchTask?.cancel()
+        activeSearchTask = nil
+
         if let session = activeSession {
             if q.hasPrefix(session.rootQueryPrefix) {
                 let sub = String(q.dropFirst(session.rootQueryPrefix.count))
@@ -97,34 +107,77 @@ public final class UIOrchestrator: ObservableObject {
         let ast = commandParser.parse(q)
 
         switch ast {
-        case .command(let name, let args, _) where ["emoji", "emojis", "e"].contains(name.lowercased()):
-            if PluginHost.shared.getNativePlugin(id: TitikPlugins.EmojiPlugin.id) != nil {
-                let subquery = args.joined(separator: " ")
-                let plugin = TitikUI.EmojiPlugin.shared
-                plugin.onSelectEmoji = { [weak self] emoji in
-                    let success = AutoPaster.shared.pasteToActiveApp(content: emoji.emoji)
-                    if success {
-                        self?.reset()
-                    }
-                }
-                plugin.handleSearchQuery(subquery)
-                self.activePluginUI = plugin
+        case .command(let name, let args, _):
+            if let manifest = PluginHost.shared.findActivePlugin(command: name),
+               let nativePlugin = PluginHost.shared.getNativePlugin(id: manifest.id),
+               let uiPlugin = nativePlugin as? (any PluginUIRepresentable) {
+                activeSearchTask?.cancel()
+                activeSearchTask = nil
                 self.results = []
                 self.selectedIndex = 0
-                return
-            } else {
-                PluginHost.shared.cancelAllActiveTasks()
-                self.activePluginUI = nil
-                let items = searchEngine.search(query: q)
-                self.results = items
-                self.selectedIndex = 0
+                let isNewPlugin = (self.activePluginUI as AnyObject !== uiPlugin as AnyObject)
+                self.activePluginUI = uiPlugin
+                if isNewPlugin {
+                    uiPlugin.keymapScope.onChange = { [weak self] in
+                        self?.objectWillChange.send()
+                    }
+                    uiPlugin.onDismiss = { [weak self] in self?.reset() }
+                    uiPlugin.onActivated()
+                }
+                uiPlugin.handleSearchQuery(args.joined(separator: " "))
                 return
             }
 
-        default:
-            PluginHost.shared.cancelAllActiveTasks()
+        case .pluginInvocation(let trigger, _, let primaryValue, _, _, _):
+            if let manifest = PluginHost.shared.findActivePlugin(command: trigger),
+               let nativePlugin = PluginHost.shared.getNativePlugin(id: manifest.id),
+               let uiPlugin = nativePlugin as? (any PluginUIRepresentable) {
+                activeSearchTask?.cancel()
+                activeSearchTask = nil
+                self.results = []
+                self.selectedIndex = 0
+                let isNewPlugin = (self.activePluginUI as AnyObject !== uiPlugin as AnyObject)
+                self.activePluginUI = uiPlugin
+                if isNewPlugin {
+                    uiPlugin.keymapScope.onChange = { [weak self] in
+                        self?.objectWillChange.send()
+                    }
+                    uiPlugin.onDismiss = { [weak self] in self?.reset() }
+                    uiPlugin.onActivated()
+                }
+                uiPlugin.handleSearchQuery(primaryValue)
+                return
+            }
+
+        case .bangSuggestion:
             self.activePluginUI = nil
-            let items = searchEngine.search(query: q)
+
+        default:
+            break
+        }
+
+        PluginHost.shared.cancelAllActiveTasks()
+        self.activePluginUI = nil
+
+        if q.isEmpty {
+            self.results = searchEngine.getDefaultItems()
+            self.selectedIndex = 0
+            return
+        }
+
+        activeSearchTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 120_000_000)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+
+            guard let self = self else { return }
+            let items = await self.searchEngine.searchAsync(query: q)
+
+            guard !Task.isCancelled else { return }
+            guard self.activePluginUI == nil else { return }
             self.results = items
             self.selectedIndex = 0
         }
@@ -180,10 +233,10 @@ public final class UIOrchestrator: ObservableObject {
             return
         }
 
-        if item.id == "bang:emoji" || item.id == "plugin:emoji" || item.actionPayload == "!emoji" || item.actionPayload == "!emoji " || (item.category == .emoji && item.id.hasPrefix("bang:")) {
+        if item.id == "bang:emoji" || (item.category == .emoji && item.id.hasPrefix("bang:")) {
             self.query = "!emoji "
             return
-        } else if item.id.hasPrefix("bang:") || item.actionPayload.hasPrefix("!") {
+        } else if item.id.hasPrefix("bang:") {
             self.query = item.actionPayload.hasSuffix(" ") ? item.actionPayload : (item.actionPayload + " ")
             return
         }
@@ -202,10 +255,13 @@ public final class UIOrchestrator: ObservableObject {
     }
 
     public func reset() {
+        activeSearchTask?.cancel()
+        activeSearchTask = nil
         PluginHost.shared.cancelAllActiveTasks()
         activeSession = nil
         query = ""
         selectedIndex = 0
+        activePluginUI?.keymapScope.onChange = nil
         activePluginUI = nil
         hideActionPalette()
         performSearch("")
@@ -290,10 +346,6 @@ public final class UIOrchestrator: ObservableObject {
         } else {
             if let item = selectedItem {
                 currentActions = actionsForItem(item)
-                selectedActionIndex = 0
-                isActionPaletteVisible = !currentActions.isEmpty
-            } else if let plugin = activePluginUI as? TitikUI.EmojiPlugin, let emoji = plugin.selectedEmoji {
-                currentActions = actionsForEmoji(emoji)
                 selectedActionIndex = 0
                 isActionPaletteVisible = !currentActions.isEmpty
             }
@@ -487,26 +539,29 @@ public final class UIOrchestrator: ObservableObject {
                 return event
             }
 
-            // 2. Cmd+K trigger
-            if event.modifierFlags.contains(.command) && code == Keycode.k.rawValue {
-                self.toggleActionPalette()
-                return nil
-            }
-
-            // 3. Active Plugin UI mode navigation
+            // 2. Active Plugin UI mode navigation
             if let plugin = self.activePluginUI {
+                if event.modifierFlags.contains(.command) && code == Keycode.l.rawValue {
+                    self.focusSearchBar()
+                    return nil
+                }
+
+                if plugin.keymapScope.trigger(event: event) {
+                    return nil
+                }
+
                 if code == Keycode.escape.rawValue {
                     WindowController.shared.hideWindow()
                     return nil
                 }
-                if code == Keycode.returnKey.rawValue {
-                    plugin.submitQuery()
-                    return nil
-                }
-                if plugin.handleKeyDown(event: event) {
-                    return nil
-                }
+
                 return event
+            }
+
+            // 3. Cmd+K trigger
+            if event.modifierFlags.contains(.command) && code == Keycode.k.rawValue {
+                self.toggleActionPalette()
+                return nil
             }
 
             // 4. Standard List navigation
@@ -618,6 +673,7 @@ public struct MainContentView: View {
                 // Search Bar
                 SearchBarView(
                     text: $orchestrator.query,
+                    focusSignal: orchestrator.focusSearchBarSignal,
                     onSubmit: {
                         orchestrator.executeSelected()
                     },
@@ -670,7 +726,8 @@ public struct MainContentView: View {
                     isPluginActive: orchestrator.activePluginUI != nil,
                     isActionPaletteActive: orchestrator.isActionPaletteVisible,
                     isCategoryDirectory: orchestrator.selectedItem?.category == .directory,
-                    canGoBack: PathResolver.canGoBack(path: orchestrator.query)
+                    canGoBack: PathResolver.canGoBack(path: orchestrator.query),
+                    pluginKeycaps: orchestrator.activePluginUI?.footerKeycaps
                 )
             }
             .padding(16)

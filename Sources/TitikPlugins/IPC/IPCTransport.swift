@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 import TitikCore
 
 public final class IPCMessageWriter: @unchecked Sendable {
@@ -44,17 +49,22 @@ public enum IPCTransport {
         signal(SIGPIPE, SIG_IGN)
         let readerThread = Thread {
             var buffer = Data()
+            let fd = handle.fileDescriptor
+            var rawBuf = [UInt8](repeating: 0, count: 65536)
             while true {
                 let chunk: Data
-                do {
-                    if let available = try handle.read(upToCount: 65536), !available.isEmpty {
-                        chunk = available
-                    } else {
-                        // EOF
-                        break
-                    }
-                } catch {
-                    // Read error / pipe broken
+                #if canImport(Darwin)
+                let bytesRead = Darwin.read(fd, &rawBuf, rawBuf.count)
+                #elseif canImport(Glibc)
+                let bytesRead = Glibc.read(fd, &rawBuf, rawBuf.count)
+                #else
+                let bytesRead = read(fd, &rawBuf, rawBuf.count)
+                #endif
+
+                if bytesRead > 0 {
+                    chunk = Data(rawBuf[0..<bytesRead])
+                } else {
+                    // EOF or error
                     break
                 }
 

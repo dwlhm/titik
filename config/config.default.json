@@ -48,6 +48,17 @@
   },
   "plugins": {
     "titik.system.plugin": true,
-    "titik.builtin.emoji": true
-  }
+    "titik.builtin.app": true,
+    "titik.builtin.file": true,
+    "titik.builtin.clipboard": true,
+    "titik.builtin.system": true,
+    "titik.builtin.calculator": true,
+    "titik.builtin.emoji": true,
+    "titik.builtin.launcher": true,
+    "titik.builtin.shortcuts": true,
+    "titik.plugin.zen": true,
+    "titik.plugin.activitymonitor": true,
+    "titik.plugin.notes": true
+  },
+  "shortcuts": []
 }

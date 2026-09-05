@@ -54,6 +54,9 @@ public final class WindowController: NSObject, NSWindowDelegate {
 
     public override init() {
         super.init()
+        AutoPaster.shared.windowCloser = { [weak self] in
+            self?.hideWindow()
+        }
     }
 
     public func setupWindow(contentView: AnyView, width: CGFloat = 720, height: CGFloat = 460) {
@@ -84,11 +87,40 @@ public final class WindowController: NSObject, NSWindowDelegate {
             name: NSWindow.didResignKeyNotification,
             object: p
         )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidBecomeActive),
+            name: NSApplication.didBecomeActiveNotification,
+            object: nil
+        )
+    }
+
+    @objc public func applicationDidBecomeActive(_ notification: Notification) {
+        if let panel = panel, panel.isVisible, !panel.isKeyWindow {
+            panel.makeKey()
+        }
     }
 
     @objc public func windowDidResignKey(_ notification: Notification) {
         guard autoHideOnBlur else { return }
-        hideWindow()
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.autoHideOnBlur else { return }
+            guard let panel = self.panel, panel.isVisible, !panel.isKeyWindow else { return }
+
+            if let frontmost = NSWorkspace.shared.frontmostApplication {
+                let bundleId = frontmost.bundleIdentifier ?? ""
+                if bundleId.hasPrefix("com.apple.coreservices") ||
+                   bundleId == "com.apple.SecurityAgent" ||
+                   bundleId == "com.apple.UserNotificationCenter" ||
+                   frontmost.processIdentifier == NSRunningApplication.current.processIdentifier {
+                    return
+                }
+            }
+
+            self.hideWindow()
+        }
     }
 
     public func centerOnActiveScreen() {

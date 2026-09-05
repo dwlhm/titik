@@ -1,6 +1,8 @@
+import Foundation
 import SwiftUI
 import AppKit
 import TitikUI
+@_exported import Markdown
 
 public enum MarkdownBlock: Identifiable, Equatable, Sendable {
     case heading(level: Int, text: String)
@@ -34,227 +36,169 @@ public struct MarkdownASTParser: Sendable {
     private static let imageLineRegex = try? NSRegularExpression(
         pattern: #"^!\[([^\]]*)\]\(([^)\s]+)\)$"#
     )
-    private static let tableSeparatorPattern = #"^\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?$"#
-
-    private static func indentLevel(of line: String) -> Int {
-        var spaces = 0
-        var tabs = 0
-        for character in line {
-            if character == " " {
-                spaces += 1
-            } else if character == "\t" {
-                tabs += 1
-            } else {
-                break
-            }
-        }
-        return max(0, spaces / 4 + tabs)
-    }
 
     public static func parse(_ rawText: String) -> [MarkdownBlock] {
-        var blocks: [MarkdownBlock] = []
         // Sanitize raw dangerous HTML tags
         let sanitized = rawText
             .replacingOccurrences(of: "<script[\\s\\S]*?</script>", with: "", options: .regularExpression)
             .replacingOccurrences(of: "<style[\\s\\S]*?</style>", with: "", options: .regularExpression)
 
-        let lines = sanitized.components(separatedBy: "\n")
-        var inCodeBlock = false
-        var codeLang = ""
-        var codeAccumulator: [String] = []
-        var inMathBlock = false
-        var mathAccumulator: [String] = []
-        var paragraphAccumulator: [String] = []
-        var tableAccumulator: [String] = []
+        let document = Document(parsing: sanitized)
+        var blocks: [MarkdownBlock] = []
 
-        func flushParagraph() {
-            if !paragraphAccumulator.isEmpty {
-                let joined = paragraphAccumulator.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-                if !joined.isEmpty {
-                    blocks.append(.paragraph(text: joined))
+        func parseList(list: ListItemContainer, indent: Int) -> [MarkdownBlock] {
+            var listBlocks: [MarkdownBlock] = []
+            var currentIndex = (list as? OrderedList).map { Int($0.startIndex) } ?? 1
+
+            for item in list.listItems {
+                var itemTextParts: [String] = []
+                var nestedContainers: [ListItemContainer] = []
+
+                for child in item.children {
+                    if let p = child as? Paragraph {
+                        let text = p.format().trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !text.isEmpty {
+                            itemTextParts.append(text)
+                        }
+                    } else if let nestedList = child as? ListItemContainer {
+                        nestedContainers.append(nestedList)
+                    }
                 }
-                paragraphAccumulator.removeAll()
+
+                let rawItemText = itemTextParts.joined(separator: " ")
+                let formattedText: String
+                if item.checkbox == .checked {
+                    formattedText = "☑ " + rawItemText
+                } else if item.checkbox == .unchecked {
+                    formattedText = "☐ " + rawItemText
+                } else {
+                    formattedText = rawItemText
+                }
+
+                if list is OrderedList {
+                    listBlocks.append(.numberedItem(number: currentIndex, text: formattedText, indent: indent))
+                    currentIndex += 1
+                } else {
+                    listBlocks.append(.bulletItem(text: formattedText, indent: indent))
+                }
+
+                for nested in nestedContainers {
+                    listBlocks.append(contentsOf: parseList(list: nested, indent: indent + 1))
+                }
             }
+
+            return listBlocks
         }
 
-        func splitTableRow(_ line: String) -> [String] {
-            var content = line
-            if content.hasPrefix("|") { content.removeFirst() }
-            if content.hasSuffix("|") { content.removeLast() }
-            return content.components(separatedBy: "|").map {
-                $0.trimmingCharacters(in: .whitespaces)
-            }
-        }
+        for child in document.children {
+            switch child {
+            case let h as Heading:
+                blocks.append(.heading(level: h.level, text: h.plainText))
 
-        func flushTable() {
-            guard !tableAccumulator.isEmpty else { return }
-            let isWellFormed = tableAccumulator.count >= 2
-                && tableAccumulator[1].range(of: tableSeparatorPattern, options: .regularExpression) != nil
-            if isWellFormed {
-                let header = splitTableRow(tableAccumulator[0])
-                let rows = tableAccumulator.dropFirst(2).map(splitTableRow)
+            case let p as Paragraph:
+                // Check if paragraph is a single image
+                if p.childCount == 1, let img = p.child(at: 0) as? Markdown.Image {
+                    blocks.append(.image(url: img.source ?? "", alt: img.plainText))
+                    continue
+                }
+
+                let trimmed = p.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                // Check image regex fallback
+                if let regex = imageLineRegex,
+                   let match = regex.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)),
+                   let altRange = Range(match.range(at: 1), in: trimmed),
+                   let urlRange = Range(match.range(at: 2), in: trimmed) {
+                    blocks.append(.image(url: String(trimmed[urlRange]), alt: String(trimmed[altRange])))
+                    continue
+                }
+
+                let text = p.format().trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { continue }
+
+                // Check for LaTeX math blocks delimited by $$
+                if text.contains("$$") {
+                    let parts = text.components(separatedBy: "$$")
+                    if parts.count >= 3 && parts.count % 2 == 1 {
+                        for (idx, part) in parts.enumerated() {
+                            let trimmedPart = part.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !trimmedPart.isEmpty else { continue }
+                            if idx % 2 == 1 {
+                                blocks.append(.math(text: trimmedPart))
+                            } else {
+                                blocks.append(.paragraph(text: trimmedPart))
+                            }
+                        }
+                        continue
+                    }
+                }
+
+                blocks.append(.paragraph(text: text))
+
+            case let codeBlock as CodeBlock:
+                let lang = codeBlock.language ?? ""
+                let code = codeBlock.code
+
+                // Check if this was an indented bullet item parsed as an indented code block
+                if lang.isEmpty && (code.hasPrefix("- ") || code.hasPrefix("* ")) {
+                    let indent = max(1, ((codeBlock.range?.lowerBound.column ?? 5) - 1) / 4)
+                    let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let content = String(trimmedCode.dropFirst(2))
+                    if content.hasPrefix("[x] ") || content.hasPrefix("[X] ") {
+                        blocks.append(.bulletItem(text: "☑ " + String(content.dropFirst(4)), indent: indent))
+                    } else if content.hasPrefix("[ ] ") {
+                        blocks.append(.bulletItem(text: "☐ " + String(content.dropFirst(4)), indent: indent))
+                    } else {
+                        blocks.append(.bulletItem(text: content, indent: indent))
+                    }
+                    continue
+                }
+
+                blocks.append(.codeBlock(language: lang, code: code))
+
+            case let quote as BlockQuote:
+                var quoteParts: [String] = []
+                for qChild in quote.children {
+                    if let p = qChild as? Paragraph {
+                        quoteParts.append(p.format().trimmingCharacters(in: .whitespacesAndNewlines))
+                    } else {
+                        quoteParts.append(qChild.format().trimmingCharacters(in: .whitespacesAndNewlines))
+                    }
+                }
+                var quoteText = quoteParts.joined(separator: "\n\n")
+                if quoteText.isEmpty {
+                    quoteText = quote.format().trimmingCharacters(in: .whitespacesAndNewlines)
+                    if quoteText.hasPrefix("> ") {
+                        quoteText = String(quoteText.dropFirst(2))
+                    } else if quoteText.hasPrefix(">") {
+                        quoteText = String(quoteText.dropFirst(1))
+                    }
+                }
+                blocks.append(.quote(text: quoteText))
+
+            case let table as Markdown.Table:
+                let header = Array(table.head.cells.map { $0.plainText.trimmingCharacters(in: .whitespaces) })
+                let rows = Array(table.body.rows.map { row in
+                    Array(row.cells.map { $0.plainText.trimmingCharacters(in: .whitespaces) })
+                })
                 blocks.append(.table(header: header, rows: rows))
-            } else {
-                for line in tableAccumulator {
-                    paragraphAccumulator.append(line)
-                }
-            }
-            tableAccumulator.removeAll()
-        }
 
-        for line in lines {
-            let indent = indentLevel(of: line)
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            case let list as UnorderedList:
+                blocks.append(contentsOf: parseList(list: list, indent: 0))
 
-            // Code block fence
-            if trimmed.hasPrefix("```") {
-                if inCodeBlock {
-                    // Close code block
-                    blocks.append(.codeBlock(language: codeLang, code: codeAccumulator.joined(separator: "\n")))
-                    codeAccumulator.removeAll()
-                    codeLang = ""
-                    inCodeBlock = false
-                } else {
-                    flushParagraph()
-                    inCodeBlock = true
-                    codeLang = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
-                }
-                continue
-            }
+            case let list as OrderedList:
+                blocks.append(contentsOf: parseList(list: list, indent: 0))
 
-            if inCodeBlock {
-                codeAccumulator.append(line)
-                continue
-            }
-
-            // Math block fence $$
-            if trimmed == "$$" || trimmed.hasPrefix("$$") && trimmed.hasSuffix("$$") && trimmed.count > 2 {
-                if inMathBlock {
-                    blocks.append(.math(text: mathAccumulator.joined(separator: "\n")))
-                    mathAccumulator.removeAll()
-                    inMathBlock = false
-                } else if trimmed == "$$" {
-                    flushParagraph()
-                    inMathBlock = true
-                } else {
-                    flushParagraph()
-                    let mathText = String(trimmed.dropFirst(2).dropLast(2)).trimmingCharacters(in: .whitespaces)
-                    blocks.append(.math(text: mathText))
-                }
-                continue
-            }
-
-            if inMathBlock {
-                mathAccumulator.append(line)
-                continue
-            }
-
-            // Tables: accumulate consecutive lines starting with |
-            if trimmed.hasPrefix("|") {
-                flushParagraph()
-                tableAccumulator.append(trimmed)
-                continue
-            }
-            flushTable()
-
-            // Empty line flushes paragraph
-            if trimmed.isEmpty {
-                flushParagraph()
-                continue
-            }
-
-            // Horizontal rule
-            if trimmed == "---" || trimmed == "***" || trimmed == "___" {
-                flushParagraph()
+            case is ThematicBreak:
                 blocks.append(.divider)
-                continue
-            }
 
-            // Headings (longest hash prefix first)
-            if trimmed.hasPrefix("###### ") {
-                flushParagraph()
-                blocks.append(.heading(level: 6, text: String(trimmed.dropFirst(7))))
-                continue
-            } else if trimmed.hasPrefix("##### ") {
-                flushParagraph()
-                blocks.append(.heading(level: 5, text: String(trimmed.dropFirst(6))))
-                continue
-            } else if trimmed.hasPrefix("#### ") {
-                flushParagraph()
-                blocks.append(.heading(level: 4, text: String(trimmed.dropFirst(5))))
-                continue
-            } else if trimmed.hasPrefix("### ") {
-                flushParagraph()
-                blocks.append(.heading(level: 3, text: String(trimmed.dropFirst(4))))
-                continue
-            } else if trimmed.hasPrefix("## ") {
-                flushParagraph()
-                blocks.append(.heading(level: 2, text: String(trimmed.dropFirst(3))))
-                continue
-            } else if trimmed.hasPrefix("# ") {
-                flushParagraph()
-                blocks.append(.heading(level: 1, text: String(trimmed.dropFirst(2))))
-                continue
-            }
-
-            // Blockquote
-            if trimmed.hasPrefix("> ") {
-                flushParagraph()
-                blocks.append(.quote(text: String(trimmed.dropFirst(2))))
-                continue
-            }
-
-            // Standalone image line
-            if let regex = imageLineRegex, let match = regex.firstMatch(
-                in: trimmed,
-                range: NSRange(trimmed.startIndex..., in: trimmed)
-            ) {
-                flushParagraph()
-                let alt = String(trimmed[Range(match.range(at: 1), in: trimmed)!])
-                let url = String(trimmed[Range(match.range(at: 2), in: trimmed)!])
-                blocks.append(.image(url: url, alt: alt))
-                continue
-            }
-
-            // Bullet list (with task-list and nesting support)
-            if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
-                flushParagraph()
-                let text = String(trimmed.dropFirst(2))
-                if text.hasPrefix("[ ] ") {
-                    blocks.append(.bulletItem(text: "☐ " + String(text.dropFirst(4)), indent: indent))
-                } else if text.hasPrefix("[x] ") || text.hasPrefix("[X] ") {
-                    blocks.append(.bulletItem(text: "☑ " + String(text.dropFirst(4)), indent: indent))
-                } else {
-                    blocks.append(.bulletItem(text: text, indent: indent))
+            default:
+                let text = child.format().trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty {
+                    blocks.append(.paragraph(text: text))
                 }
-                continue
             }
-
-            // Numbered list (e.g. "1. ")
-            if let match = trimmed.range(of: #"^\d+\.\s+"#, options: .regularExpression) {
-                flushParagraph()
-                let prefix = String(trimmed[match])
-                let numStr = prefix.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
-                let num = Int(numStr) ?? 1
-                let text = String(trimmed[match.upperBound...])
-                blocks.append(.numberedItem(number: num, text: text, indent: indent))
-                continue
-            }
-
-            // Standard line in paragraph
-            paragraphAccumulator.append(trimmed)
         }
-
-        // Auto-close open code fence safely
-        if inCodeBlock {
-            blocks.append(.codeBlock(language: codeLang, code: codeAccumulator.joined(separator: "\n")))
-        }
-        // Auto-close open math block safely
-        if inMathBlock {
-            blocks.append(.math(text: mathAccumulator.joined(separator: "\n")))
-        }
-        flushTable()
-        flushParagraph()
 
         return blocks
     }
@@ -282,7 +226,7 @@ private struct AsyncImageView: View {
                     Image(systemName: "photo")
                         .foregroundColor(Color.white.opacity(0.4))
                         .font(.system(size: 24))
-                    Text("!\([alt])(\(urlString))")
+                    Text("![\(alt)](\(urlString))")
                         .font(.system(size: 10))
                         .foregroundColor(Color.white.opacity(0.35))
                 }
@@ -545,69 +489,14 @@ public struct TitikMarkdownView: View {
             text = regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: "**[$1]**")
         }
 
-        let nsAttr = NSMutableAttributedString(string: text)
-        let baseFont = NSFont.systemFont(ofSize: 13.5)
-        nsAttr.addAttribute(.font, value: baseFont, range: NSRange(location: 0, length: nsAttr.length))
-
-        // Step 2: Define patterns in priority order (code spans first to protect inner content)
-        let codeAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)]
-        let boldAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: 13.5)]
-        let italicFont: NSFont = {
-            let descriptor = NSFont.systemFont(ofSize: 13.5).fontDescriptor.withSymbolicTraits(.italic)
-            return NSFont(descriptor: descriptor, size: 13.5) ?? NSFont.systemFont(ofSize: 13.5)
-        }()
-        let italicAttrs: [NSAttributedString.Key: Any] = [.font: italicFont]
-        let linkAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: NSColor.systemBlue, .underlineStyle: NSUnderlineStyle.single.rawValue]
-        let strikeAttrs: [NSAttributedString.Key: Any] = [.strikethroughStyle: NSUnderlineStyle.single.rawValue]
-
-        let patterns: [(regex: NSRegularExpression, attrs: [NSAttributedString.Key: Any])] = [
-            (try! NSRegularExpression(pattern: #"`([^`]+)`"#), codeAttrs),
-            (try! NSRegularExpression(pattern: #"\*\*([^\*]+)\*\*"#), boldAttrs),
-            (try! NSRegularExpression(pattern: #"(?<!\*)\*([^*]+)\*(?!\*)"#), italicAttrs),
-            (try! NSRegularExpression(pattern: #"\[([^\]]+)\]\(([^)]+)\)"#), linkAttrs),
-            (try! NSRegularExpression(pattern: #"~~([^~]+)~~"#), strikeAttrs),
-        ]
-
-        // Step 3: Collect all matches across all patterns
-        var allMatches: [(fullRange: NSRange, contentRange: NSRange, patternIndex: Int)] = []
-        for (index, pattern) in patterns.enumerated() {
-            pattern.regex.enumerateMatches(in: text, range: NSRange(location: 0, length: text.utf16.count)) { result, _, _ in
-                guard let result = result else { return }
-                allMatches.append((result.range, result.range(at: 1), index))
-            }
+        // Step 2: Safe native markdown parsing using AttributedString
+        if let attr = try? AttributedString(
+            markdown: text,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            return attr
         }
 
-        // Step 4: Sort by start position, then filter out overlapping matches
-        allMatches.sort { $0.fullRange.location < $1.fullRange.location }
-
-        var filtered: [(NSRange, NSRange, Int)] = []
-        var lastEnd = 0
-        for match in allMatches {
-            if match.fullRange.location >= lastEnd {
-                filtered.append(match)
-                lastEnd = match.fullRange.location + match.fullRange.length
-            }
-        }
-
-        // Step 5: Build ranges list (full range, content range, attributes)
-        struct AttrRange {
-            let fullRange: NSRange
-            let contentRange: NSRange
-            let attributes: [NSAttributedString.Key: Any]
-        }
-        let ranges: [AttrRange] = filtered.map { match in
-            AttrRange(fullRange: match.0, contentRange: match.1, attributes: patterns[match.2].attrs)
-        }
-
-        // Step 6: Process from back to front so index shifts don't affect earlier matches
-        let sortedRanges = ranges.sorted { $0.fullRange.location > $1.fullRange.location }
-        for r in sortedRanges {
-            nsAttr.addAttributes(r.attributes, range: r.contentRange)
-            // Delete closing delimiter first, then opening (reverse order preserves earlier indices)
-            nsAttr.deleteCharacters(in: NSRange(location: r.fullRange.location + r.fullRange.length - 2, length: 2))
-            nsAttr.deleteCharacters(in: NSRange(location: r.fullRange.location, length: 2))
-        }
-
-        return AttributedString(nsAttr)
+        return AttributedString(text)
     }
 }

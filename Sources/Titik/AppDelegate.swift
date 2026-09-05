@@ -17,6 +17,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 1. Load configuration
         let config = ConfigLoader.shared.load()
+        _ = try? ConfigLoader.shared.ensureConfigFileExists()
         Logger.shared.info("Titik application launching...", subsystem: "Titik.App")
 
         // 2. Set window behaviors
@@ -48,7 +49,52 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // 7. Register global hotkey
+        // 7. Wire PluginContext HUD presenter and dismisser
+        PluginContext.hudPresenter = { @MainActor query in
+            WindowController.shared.showWindow()
+            if let q = query {
+                UIOrchestrator.shared.query = q
+            }
+        }
+        PluginContext.hudDismisser = { @MainActor in
+            WindowController.shared.hideWindow()
+        }
+
+        // 8. Wire Shortcuts search bridge for dynamic recommendations
+        ShortcutsPluginViewModel.searchBridge = { @MainActor query in
+            let items = await SearchEngine.shared.searchAsync(query: query)
+            return items.prefix(25).map { item in
+                let example: String
+                let iconName: String
+                switch item.category {
+                case .application:
+                    example = "!app \(item.title)"
+                    iconName = "app.badge"
+                case .systemCommand:
+                    example = item.actionPayload.hasPrefix("!") ? item.actionPayload : "!cmd \(item.actionPayload)"
+                    iconName = "gearshape.fill"
+                case .plugin:
+                    example = item.actionPayload.hasPrefix("!") ? item.actionPayload : "!\(item.actionPayload)"
+                    iconName = "puzzlepiece.extension.fill"
+                case .file:
+                    example = "!file \(item.actionPayload)"
+                    iconName = "folder.fill"
+                default:
+                    example = item.actionPayload.isEmpty ? item.title : item.actionPayload
+                    iconName = "terminal"
+                }
+                return BangRecommendation(
+                    id: item.id,
+                    bang: item.actionPayload,
+                    title: item.title,
+                    description: item.subtitle.isEmpty ? item.category.rawValue : item.subtitle,
+                    example: example,
+                    iconName: iconName
+                )
+            }
+        }
+
+        // 9. Register global hotkey
         let mod = config.hotkey.modifier
         let key = config.hotkey.key
         let success = HotkeyManager.shared.updateHotkey(modifier: mod, key: key) {
@@ -61,6 +107,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             Logger.shared.info("Global hotkey \(mod)+\(key) active", subsystem: "Titik.App")
         } else {
             Logger.shared.warn("Failed to bind hotkey \(mod)+\(key)", subsystem: "Titik.App")
+        }
+
+        // 10. Register user-defined shortcuts
+        ShortcutManager.shared.syncAllShortcuts { query in
+            Task {
+                await PluginCommandDispatcher.shared.dispatch(query: query)
+            }
         }
 
         Logger.shared.info("Titik startup complete", subsystem: "Titik.App")

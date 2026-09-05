@@ -46,6 +46,7 @@ public final class PluginContext: @unchecked Sendable {
     public let keychain: PluginKeychainService
     public let storageDirectory: URL
     public let temporaryDirectory: URL
+    @MainActor public lazy var keymap: PluginKeymapScope = PluginKeymapScope()
 
     public init(pluginId: String, keychain: PluginKeychainService? = nil, baseStorageURL: URL? = nil) {
         self.pluginId = pluginId
@@ -58,6 +59,19 @@ public final class PluginContext: @unchecked Sendable {
 
         try? FileManager.default.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+    }
+
+    @MainActor public static var hudPresenter: (@MainActor @Sendable (_ query: String?) -> Void)?
+    @MainActor public static var hudDismisser: (@MainActor @Sendable () -> Void)?
+
+    @MainActor
+    public func summonHUD(query: String? = nil) {
+        Self.hudPresenter?(query)
+    }
+
+    @MainActor
+    public func dismissHUD() {
+        Self.hudDismisser?()
     }
 
     @MainActor

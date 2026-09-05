@@ -11,6 +11,7 @@ public struct PluginContainerView: View {
     public var body: some View {
         if let pluginUI = pluginUI {
             pluginUI.customView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             EmptyView()
         }

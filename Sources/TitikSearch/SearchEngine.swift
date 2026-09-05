@@ -6,40 +6,33 @@ import TitikCore
 import TitikParser
 import TitikPlugins
 import TitikPluginKit
+import TitikKeymap
 
 public final class SearchEngine: @unchecked Sendable {
     public static let shared = SearchEngine()
+    public nonisolated(unsafe) static var pluginCommandDispatcher: (@Sendable (_ pluginId: String, _ payload: String) -> Bool)?
 
-    private let appLauncher: AppLauncher
-    private let systemCommands: SystemCommands
-    private let clipboardManager: ClipboardManager
     private let pluginHost: PluginHost
-    private let fileBrowser: FileBrowser
     private let parser: CommandParser
 
     public init(
-        appLauncher: AppLauncher = .shared,
-        systemCommands: SystemCommands = .shared,
-        clipboardManager: ClipboardManager = .shared,
         pluginHost: PluginHost = .shared,
-        fileBrowser: FileBrowser = .shared,
         parser: CommandParser = CommandParser()
     ) {
-        self.appLauncher = appLauncher
-        self.systemCommands = systemCommands
-        self.clipboardManager = clipboardManager
         self.pluginHost = pluginHost
-        self.fileBrowser = fileBrowser
         self.parser = parser
+
+        // Auto-register default built-in plugins if host has no registered plugins yet
+        if pluginHost.allNativePlugins().isEmpty {
+            for entry in BuiltinPluginRegistry.all {
+                let plugin = entry.factory(PluginContext(pluginId: entry.id))
+                pluginHost.registerNativePlugin(plugin, manifest: entry.manifest)
+            }
+        }
     }
 
     public func search(query: String) -> [SearchItem] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Path search check using PathResolver
-        if PathResolver.isPathQuery(trimmed) {
-            return fileBrowser.browseDirectory(path: trimmed)
-        }
 
         let ast = parser.parse(query)
         var items: [SearchItem] = []
@@ -53,132 +46,74 @@ public final class SearchEngine: @unchecked Sendable {
             if prefix.isEmpty {
                 return suggestions
             }
-            let lower = "!" + prefix.lowercased()
+            let cleanPrefix = prefix.lowercased()
+            let lower = "!" + cleanPrefix
+
+            let isShortPrefix = cleanPrefix.count == 1
+            if !isShortPrefix, let manifest = pluginHost.findActivePlugin(command: cleanPrefix) {
+                let queried = queryPluginSync(manifest: manifest, subquery: "")
+                if !queried.isEmpty {
+                    return queried
+                }
+            }
+
             let filtered = suggestions.filter { item in
                 let titleWord = item.title.components(separatedBy: " ").first?.lowercased() ?? item.title.lowercased()
                 let payloadWord = item.actionPayload.trimmingCharacters(in: .whitespaces).lowercased()
-                return titleWord.hasPrefix(lower) || payloadWord.hasPrefix(lower) || item.id.lowercased().contains(lower)
+                return titleWord.hasPrefix(lower) || payloadWord.hasPrefix(lower) || item.id == "bang:\(cleanPrefix)"
             }
-            return filtered.isEmpty ? searchAllProviders(query: prefix) : filtered
+            return filtered.isEmpty ? searchAllGlobalProviders(query: prefix) : filtered
 
-        case .expression(let exprAST):
-            // Math evaluation result
-            if let mathItem = evaluateMath(exprAST, rawQuery: trimmed, scoreBoost: 500) {
-                items.append(mathItem)
-            }
-            // Also search other items in background with lower priority
-            items.append(contentsOf: searchApplications(query: trimmed))
-            items.append(contentsOf: searchSystemCommands(query: trimmed))
+        case .expression, .raw:
+            items = searchAllGlobalProviders(query: trimmed)
 
         case .command(let name, let args, _):
             if let manifest = pluginHost.findActivePlugin(command: name) {
                 let subquery = args.joined(separator: " ")
-                nonisolated(unsafe) var pluginItems: [PluginItem] = []
-                let sema = DispatchSemaphore(value: 0)
-                Task {
-                    let (_, stream) = pluginHost.query(pluginId: manifest.id, query: subquery)
-                    for await response in stream {
-                        if case .listResult(_, let items) = response {
-                            pluginItems = items
+                return queryPluginSync(manifest: manifest, subquery: subquery)
+            }
+            items = searchAllGlobalProviders(query: trimmed)
+
+        case .pluginInvocation(let trigger, let action, let primaryValue, let flags, let booleanFlags, _):
+            if let manifest = pluginHost.findActivePlugin(command: trigger) {
+                var effectiveAction = action
+                var effectivePrimary = primaryValue
+                var effectiveFlags = flags
+                var effectiveBoolFlags = booleanFlags
+
+                if action == nil, let cmdPlugin = pluginHost.getNativePlugin(id: manifest.id) as? (any TitikCommandPlugin) {
+                    let knownSubcommands = Set(cmdPlugin.commands.flatMap { [$0.id.lowercased()] + $0.triggers.map { $0.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "!")) } })
+                    if !knownSubcommands.isEmpty {
+                        let reAst = parser.parse(query, knownSubcommands: knownSubcommands)
+                        if case .pluginInvocation(_, let reAction, let rePrimary, let reFlags, let reBoolFlags, _) = reAst {
+                            effectiveAction = reAction
+                            effectivePrimary = rePrimary
+                            effectiveFlags = reFlags
+                            effectiveBoolFlags = reBoolFlags
                         }
                     }
-                    sema.signal()
                 }
-                _ = sema.wait(timeout: .now() + .milliseconds(1500))
 
-                return pluginItems.map { pItem in
-                    let searchCategory: SearchCategory
-                    if manifest.id == "titik.builtin.emoji" || pItem.category.lowercased() == "emoji" {
-                        searchCategory = .emoji
-                    } else {
-                        searchCategory = .plugin
-                    }
-                    return SearchItem(
-                        id: "\(manifest.id):\(pItem.id)",
-                        title: pItem.title,
-                        subtitle: pItem.subtitle,
-                        category: searchCategory,
-                        score: pItem.scoreBoost + 500,
-                        actionPayload: pItem.actionPayload,
-                        previewDetail: "\(pItem.title)\n\(pItem.subtitle)",
-                        action: { [weak self] in
-                            if pItem.pluginId == "titik.system.plugin" || manifest.id == "titik.system.plugin" {
-                                if pItem.actionPayload == "reload" {
-                                    PluginManager.shared.reindex()
-                                    return true
-                                }
-                            }
-                            if !pItem.actionPayload.isEmpty {
-                                self?.clipboardManager.copyToPasteboard(pItem.actionPayload)
-                                return true
-                            }
-                            return false
-                        }
-                    )
+                var flagValues: [String: FlagValue] = [:]
+                for b in effectiveBoolFlags {
+                    flagValues[b] = .boolean(true)
                 }
-            }
-
-            let argQuery = args.joined(separator: " ")
-            switch name.lowercased() {
-            case "app", "apps", "application":
-                items = searchApplications(query: argQuery)
-            case "cmd", "sys", "system", "command":
-                items = searchSystemCommands(query: argQuery)
-            case "clip", "clipboard", "cb":
-                items = searchClipboard(query: argQuery)
-            case "emoji", "emojis", "e":
-                if argQuery.isEmpty {
-                    var emojiResults: [SearchItem] = []
-                    if let bangEmoji = getBangSuggestions().first(where: { $0.id == "bang:emoji" }) {
-                        let bangItem = SearchItem(
-                            id: bangEmoji.id,
-                            title: bangEmoji.title,
-                            subtitle: bangEmoji.subtitle,
-                            category: bangEmoji.category,
-                            score: 200,
-                            actionPayload: bangEmoji.actionPayload,
-                            autocompletePayload: bangEmoji.autocompletePayload
-                        )
-                        emojiResults.append(bangItem)
-                    }
-                    emojiResults.append(contentsOf: searchEmojis(query: ""))
-                    return emojiResults
-                } else {
-                    return searchEmojis(query: argQuery)
-                }
-            case "file", "f", "open", "folder", "browse", "find", "dir":
-                if argQuery.isEmpty {
-                    items = fileBrowser.browseDirectory(path: "~")
-                } else if PathResolver.isPathQuery(argQuery) {
-                    items = fileBrowser.browseDirectory(path: argQuery)
-                } else {
-                    let fileSearchResults = fileBrowser.searchFiles(query: argQuery)
-                    if fileSearchResults.isEmpty {
-                        items = fileBrowser.browseDirectory(path: argQuery)
-                    } else {
-                        items = fileSearchResults
+                for (k, v) in effectiveFlags {
+                    if !effectiveBoolFlags.contains(k) {
+                        flagValues[k] = .string(v)
                     }
                 }
-            case "calc", "math", "calculate":
-                let mathAST = parser.parse(argQuery)
-                if case .expression(let expr) = mathAST,
-                   let mathItem = evaluateMath(expr, rawQuery: argQuery, scoreBoost: 600) {
-                    items.append(mathItem)
-                }
-            default:
-                // General search with this query
-                items = searchAllProviders(query: trimmed)
-            }
 
-        case .raw(let rawQuery):
-            // Check if it can be evaluated as math
-            let mathAST = parser.parse("= " + rawQuery)
-            if case .expression(let expr) = mathAST,
-               let mathItem = evaluateMath(expr, rawQuery: rawQuery, scoreBoost: 300) {
-                items.append(mathItem)
+                let invocation = PluginInvocation(
+                    trigger: trigger,
+                    action: effectiveAction,
+                    primaryValue: effectivePrimary,
+                    flags: flagValues,
+                    rawInput: query
+                )
+                return queryPluginSync(manifest: manifest, invocation: invocation)
             }
-
-            items.append(contentsOf: searchAllProviders(query: rawQuery))
+            items = searchAllGlobalProviders(query: trimmed)
         }
 
         // Sort descending by score
@@ -186,333 +121,527 @@ public final class SearchEngine: @unchecked Sendable {
         return items
     }
 
-    public func getBangSuggestions() -> [SearchItem] {
-        var suggestions: [SearchItem] = [
-            SearchItem(
-                id: "bang:emoji",
-                title: "!emoji",
-                subtitle: "Search & paste emojis with interactive grid",
-                category: .emoji,
-                score: 100,
-                actionPayload: "!emoji ",
-                autocompletePayload: "!emoji "
-            ),
-            SearchItem(
-                id: "bang:file",
-                title: "!file <path/name>",
-                subtitle: "Search files or browse filesystem",
-                category: .file,
-                score: 95,
-                actionPayload: "!file ",
-                autocompletePayload: "!file "
-            ),
-            SearchItem(
-                id: "bang:app",
-                title: "!app <name>",
-                subtitle: "Scope search to applications",
-                category: .application,
-                score: 90,
-                actionPayload: "!app ",
-                autocompletePayload: "!app "
-            ),
-            SearchItem(
-                id: "bang:clip",
-                title: "!clip <query>",
-                subtitle: "Search clipboard history",
-                category: .clipboard,
-                score: 85,
-                actionPayload: "!clip ",
-                autocompletePayload: "!clip "
-            ),
-            SearchItem(
-                id: "bang:cmd",
-                title: "!cmd <command>",
-                subtitle: "Scope search to system commands",
-                category: .systemCommand,
-                score: 80,
-                actionPayload: "!cmd ",
-                autocompletePayload: "!cmd "
-            )
-        ]
+    public func searchAsync(query: String) async -> [SearchItem] {
+        if Task.isCancelled { return [] }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let nativePlugins = pluginHost.allNativePlugins()
-        for native in nativePlugins {
-            for bang in native.manifest.normalizedBangs {
-                let clean = bang.lowercased()
-                suggestions.append(
-                    SearchItem(
-                        id: "bang:\(native.manifest.id):\(clean)",
-                        title: "!\(clean) <query>",
-                        subtitle: native.manifest.description,
-                        category: .plugin,
-                        score: 75,
-                        actionPayload: "!\(clean) ",
-                        autocompletePayload: "!\(clean) "
-                    )
-                )
-            }
-        }
-
-        return suggestions
-    }
-
-    public func searchEmojis(query: String) -> [SearchItem] {
-        let emojis = EmojiCatalog.shared.search(query: query)
-        return emojis.map { emoji in
-            SearchItem(
-                id: "emoji:\(emoji.emoji)",
-                title: "\(emoji.emoji)  \(emoji.name)",
-                subtitle: "\(emoji.shortcode) • \(emoji.category.rawValue)",
-                category: .emoji,
-                score: 75,
-                actionPayload: emoji.emoji,
-                previewDetail: "Emoji: \(emoji.emoji)\nName: \(emoji.name)\nShortcode: \(emoji.shortcode)\nCategory: \(emoji.category.rawValue)\nUnicode: \(emoji.unicodeHex)\nKeywords: \(emoji.keywords.joined(separator: ", "))",
-                action: { [weak self] in
-                    self?.clipboardManager.copyToPasteboard(emoji.emoji)
-                    return true
-                }
-            )
-        }
-    }
-
-    private func searchAllProviders(query: String) -> [SearchItem] {
-        var results: [SearchItem] = []
-        results.append(contentsOf: searchApplications(query: query))
-        results.append(contentsOf: searchSystemCommands(query: query))
-        results.append(contentsOf: searchClipboard(query: query))
-        results.append(contentsOf: fileBrowser.searchFiles(query: query))
-        return results
-    }
-
-    private func getDefaultItems() -> [SearchItem] {
+        let ast = parser.parse(query)
         var items: [SearchItem] = []
 
-        // Running Applications
-        let runningApps = appLauncher.getRunningApplications()
-        for app in runningApps {
-            items.append(
-                SearchItem(
-                    id: "running:\(app.bundleURL.path)",
-                    title: app.name,
-                    subtitle: "Running Application • Press Enter to switch",
-                    category: .application,
-                    score: 200,
-                    icon: app.icon,
-                    actionPayload: app.path,
-                    previewDetail: "Running Application: \(app.name)\nPath: \(app.path)",
-                    previewType: .none,
-                    previewURL: app.bundleURL,
-                    action: { [weak self] in
-                        self?.appLauncher.activateRunningApp(bundleURL: app.bundleURL, processIdentifier: app.processIdentifier) ?? false
+        switch ast {
+        case .empty:
+            items = await getDefaultItemsAsync()
+
+        case .bangSuggestion(let prefix):
+            if Task.isCancelled { return [] }
+            let suggestions = getBangSuggestions()
+            if prefix.isEmpty {
+                return suggestions
+            }
+            let cleanPrefix = prefix.lowercased()
+            let lower = "!" + cleanPrefix
+
+            let isShortPrefix = cleanPrefix.count == 1
+            if !isShortPrefix, let manifest = pluginHost.findActivePlugin(command: cleanPrefix) {
+                let queried = await queryPluginAsync(manifest: manifest, subquery: "")
+                if !queried.isEmpty {
+                    return queried
+                }
+            }
+
+            let filtered = suggestions.filter { item in
+                let titleWord = item.title.components(separatedBy: " ").first?.lowercased() ?? item.title.lowercased()
+                let payloadWord = item.actionPayload.trimmingCharacters(in: .whitespaces).lowercased()
+                return titleWord.hasPrefix(lower) || payloadWord.hasPrefix(lower) || item.id == "bang:\(cleanPrefix)"
+            }
+            return filtered.isEmpty ? await searchAllGlobalProvidersAsync(query: prefix) : filtered
+
+        case .expression, .raw:
+            items = await searchAllGlobalProvidersAsync(query: trimmed)
+
+        case .command(let name, let args, _):
+            if let manifest = pluginHost.findActivePlugin(command: name) {
+                let subquery = args.joined(separator: " ")
+                return await queryPluginAsync(manifest: manifest, subquery: subquery)
+            }
+            items = await searchAllGlobalProvidersAsync(query: trimmed)
+
+        case .pluginInvocation(let trigger, let action, let primaryValue, let flags, let booleanFlags, _):
+            if let manifest = pluginHost.findActivePlugin(command: trigger) {
+                var effectiveAction = action
+                var effectivePrimary = primaryValue
+                var effectiveFlags = flags
+                var effectiveBoolFlags = booleanFlags
+
+                if action == nil, let cmdPlugin = pluginHost.getNativePlugin(id: manifest.id) as? (any TitikCommandPlugin) {
+                    let knownSubcommands = Set(cmdPlugin.commands.flatMap { [$0.id.lowercased()] + $0.triggers.map { $0.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "!")) } })
+                    if !knownSubcommands.isEmpty {
+                        let reAst = parser.parse(query, knownSubcommands: knownSubcommands)
+                        if case .pluginInvocation(_, let reAction, let rePrimary, let reFlags, let reBoolFlags, _) = reAst {
+                            effectiveAction = reAction
+                            effectivePrimary = rePrimary
+                            effectiveFlags = reFlags
+                            effectiveBoolFlags = reBoolFlags
+                        }
                     }
-                )
-            )
-        }
+                }
 
-        // System Commands
-        let cmds = systemCommands.getAllCommands()
-        for cmd in cmds.prefix(4) {
-            items.append(
-                SearchItem(
-                    id: cmd.id,
-                    title: cmd.title,
-                    subtitle: cmd.subtitle,
-                    category: .systemCommand,
-                    score: 90,
-                    actionPayload: cmd.id,
-                    previewDetail: "macOS System Command: \(cmd.title)\n\(cmd.subtitle)",
-                    previewType: .none,
-                    action: { cmd.action() }
-                )
-            )
-        }
-
-        // Recent Clipboard Items
-        let clips = clipboardManager.getItems()
-        for clip in clips.prefix(3) {
-            items.append(
-                SearchItem(
-                    id: "clip:\(clip.id.uuidString)",
-                    title: clip.preview,
-                    subtitle: "Copied (\(clip.lineCount) lines)",
-                    category: .clipboard,
-                    score: 80,
-                    actionPayload: clip.content,
-                    previewDetail: clip.content,
-                    previewType: .none,
-                    action: { [weak self] in
-                        self?.clipboardManager.copyToPasteboard(clip.content)
-                        return true
+                var flagValues: [String: FlagValue] = [:]
+                for b in effectiveBoolFlags {
+                    flagValues[b] = .boolean(true)
+                }
+                for (k, v) in effectiveFlags {
+                    if !effectiveBoolFlags.contains(k) {
+                        flagValues[k] = .string(v)
                     }
+                }
+
+                let invocation = PluginInvocation(
+                    trigger: trigger,
+                    action: effectiveAction,
+                    primaryValue: effectivePrimary,
+                    flags: flagValues,
+                    rawInput: query
                 )
-            )
+                return await queryPluginAsync(manifest: manifest, invocation: invocation)
+            }
+            items = await searchAllGlobalProvidersAsync(query: trimmed)
         }
 
+        if Task.isCancelled { return [] }
+        // Sort descending by score
+        items.sort { $0.score > $1.score }
         return items
     }
 
-    private func searchApplications(query: String) -> [SearchItem] {
-        let apps = appLauncher.getApplications()
-        var results: [SearchItem] = []
+    public func getBangSuggestions() -> [SearchItem] {
+        var suggestions: [SearchItem] = []
+        let nativePlugins = pluginHost.allNativePlugins()
 
-        for app in apps {
-            if query.isEmpty {
-                results.append(
-                    SearchItem(
-                        id: "app:\(app.path)",
-                        title: app.name,
-                        subtitle: app.path,
-                        category: .application,
-                        score: 50,
-                        icon: app.icon,
-                        actionPayload: app.path,
-                        previewDetail: "Application: \(app.name)\nPath: \(app.path)",
-                        action: { [weak self] in
-                            self?.appLauncher.launchApp(at: app.path) ?? false
-                        }
+        for native in nativePlugins {
+            let manifest = native.manifest
+            let searchCategory = categoryForPlugin(id: manifest.id)
+            let baseScore = scoreForPlugin(id: manifest.id)
+
+            for bang in manifest.normalizedBangs {
+                let clean = bang.lowercased()
+                let bangId = "bang:\(clean)"
+                if !suggestions.contains(where: { $0.id == bangId || $0.id == "bang:\(manifest.id):\(clean)" }) {
+                    suggestions.append(
+                        SearchItem(
+                            id: bangId,
+                            title: "!\(clean)",
+                            subtitle: manifest.description,
+                            category: searchCategory,
+                            score: baseScore,
+                            actionPayload: "!\(clean) ",
+                            autocompletePayload: "!\(clean) "
+                        )
                     )
-                )
-            } else if let match = FuzzyMatcher.match(query: query, target: app.name) {
-                results.append(
-                    SearchItem(
-                        id: "app:\(app.path)",
-                        title: app.name,
-                        subtitle: app.path,
-                        category: .application,
-                        score: match.score + 50, // Base app preference bonus
-                        icon: app.icon,
-                        actionPayload: app.path,
-                        matchedIndices: match.matchedIndices,
-                        previewDetail: "Application: \(app.name)\nPath: \(app.path)",
-                        action: { [weak self] in
-                            self?.appLauncher.launchApp(at: app.path) ?? false
+                }
+            }
+
+            if let cmdPlugin = native.plugin as? (any TitikCommandPlugin) {
+                for cmd in cmdPlugin.commands {
+                    for trigger in cmd.triggers {
+                        let cleanTrigger = trigger.trimmingCharacters(in: CharacterSet(charactersIn: "!")).lowercased()
+                        let bangId = "bang:\(manifest.id):\(cmd.id):\(cleanTrigger)"
+                        if !suggestions.contains(where: { $0.id == bangId || $0.id == "bang:\(cleanTrigger)" }) {
+                            let argNames = cmd.arguments.map(\.name).joined(separator: ", ")
+                            let argHint = argNames.isEmpty ? "" : " <\(argNames)>"
+                            suggestions.append(
+                                SearchItem(
+                                    id: bangId,
+                                    title: "!\(cleanTrigger)\(argHint)",
+                                    subtitle: "\(cmd.name) — \(cmd.description)",
+                                    category: searchCategory,
+                                    score: baseScore - 5,
+                                    actionPayload: "!\(cleanTrigger) ",
+                                    autocompletePayload: "!\(cleanTrigger) "
+                                )
+                            )
                         }
-                    )
-                )
+                    }
+                }
             }
         }
-        return results
+
+        suggestions.sort { $0.score > $1.score }
+        return suggestions
     }
 
-    private func searchSystemCommands(query: String) -> [SearchItem] {
-        let cmds = systemCommands.getAllCommands()
-        var results: [SearchItem] = []
+    public func searchAllGlobalProvidersAsync(query: String) async -> [SearchItem] {
+        if Task.isCancelled { return [] }
+        let plugins = pluginHost.allNativePlugins()
 
-        for cmd in cmds {
-            if query.isEmpty {
-                results.append(
-                    SearchItem(
+        let allPluginItems: [(PluginItem, PluginManifest)] = await withTaskGroup(of: [(PluginItem, PluginManifest)].self) { group in
+            for loaded in plugins {
+                guard let provider = loaded.plugin as? (any TitikGlobalSearchProvider) else { continue }
+                let manifest = loaded.manifest
+                group.addTask {
+                    if Task.isCancelled { return [] }
+                    let items = await provider.provideGlobalSearchResults(query: query)
+                    if Task.isCancelled { return [] }
+                    return items.map { ($0, manifest) }
+                }
+            }
+            var accumulated: [(PluginItem, PluginManifest)] = []
+            for await results in group {
+                if Task.isCancelled { return [] }
+                accumulated.append(contentsOf: results)
+            }
+            return accumulated
+        }
+
+        if Task.isCancelled { return [] }
+        return allPluginItems.flatMap { item, manifest in
+            mapPluginItems([item], manifest: manifest)
+        }
+    }
+
+    public func searchAllGlobalProviders(query: String) -> [SearchItem] {
+        nonisolated(unsafe) var allPluginItems: [(PluginItem, PluginManifest)] = []
+        let sema = DispatchSemaphore(value: 0)
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            Task {
+                await withTaskGroup(of: [(PluginItem, PluginManifest)].self) { group in
+                    for loaded in self.pluginHost.allNativePlugins() {
+                        guard let provider = loaded.plugin as? (any TitikGlobalSearchProvider) else { continue }
+                        let manifest = loaded.manifest
+                        group.addTask {
+                            let items = await provider.provideGlobalSearchResults(query: query)
+                            return items.map { ($0, manifest) }
+                        }
+                    }
+                    for await results in group {
+                        allPluginItems.append(contentsOf: results)
+                    }
+                }
+                sema.signal()
+            }
+        }
+        _ = sema.wait(timeout: .now() + .milliseconds(1500))
+
+        return allPluginItems.flatMap { item, manifest in
+            mapPluginItems([item], manifest: manifest)
+        }
+    }
+
+    public func getDefaultItemsAsync() async -> [SearchItem] {
+        if Task.isCancelled { return [] }
+        let plugins = pluginHost.allNativePlugins()
+
+        let allPluginItems: [(PluginItem, PluginManifest)] = await withTaskGroup(of: [(PluginItem, PluginManifest)].self) { group in
+            for loaded in plugins {
+                guard let provider = loaded.plugin as? (any TitikGlobalSearchProvider) else { continue }
+                let manifest = loaded.manifest
+                group.addTask {
+                    if Task.isCancelled { return [] }
+                    let items = await provider.provideDefaultItems()
+                    if Task.isCancelled { return [] }
+                    return items.map { ($0, manifest) }
+                }
+            }
+            var accumulated: [(PluginItem, PluginManifest)] = []
+            for await results in group {
+                if Task.isCancelled { return [] }
+                accumulated.append(contentsOf: results)
+            }
+            return accumulated
+        }
+
+        if Task.isCancelled { return [] }
+        return allPluginItems.flatMap { item, manifest in
+            mapPluginItems([item], manifest: manifest)
+        }
+    }
+
+    public func getDefaultItems() -> [SearchItem] {
+        nonisolated(unsafe) var allPluginItems: [(PluginItem, PluginManifest)] = []
+        let sema = DispatchSemaphore(value: 0)
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            Task {
+                await withTaskGroup(of: [(PluginItem, PluginManifest)].self) { group in
+                    for loaded in self.pluginHost.allNativePlugins() {
+                        guard let provider = loaded.plugin as? (any TitikGlobalSearchProvider) else { continue }
+                        let manifest = loaded.manifest
+                        group.addTask {
+                            let items = await provider.provideDefaultItems()
+                            return items.map { ($0, manifest) }
+                        }
+                    }
+                    for await results in group {
+                        allPluginItems.append(contentsOf: results)
+                    }
+                }
+                sema.signal()
+            }
+        }
+        _ = sema.wait(timeout: .now() + .milliseconds(1500))
+
+        return allPluginItems.flatMap { item, manifest in
+            mapPluginItems([item], manifest: manifest)
+        }
+    }
+
+    public func queryPluginAsync(manifest: PluginManifest, invocation: PluginInvocation) async -> [SearchItem] {
+        if Task.isCancelled { return [] }
+        let local = pluginHost.getNativePlugin(id: manifest.id)
+
+        if let streaming = local as? (any TitikStreamingPlugin) {
+            if let canvas = try? await streaming.onQuery(invocation: invocation) {
+                if Task.isCancelled { return [] }
+                if case .list(let listItems) = canvas {
+                    return mapPluginItems(listItems, manifest: manifest)
+                }
+            }
+            return []
+        } else if let cmdPlugin = local as? (any TitikCommandPlugin) {
+            let filterTerm = invocation.action ?? invocation.primaryValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let items: [PluginItem]
+            if filterTerm.isEmpty {
+                items = cmdPlugin.commands.map { cmd in
+                    PluginItem(
                         id: cmd.id,
-                        title: cmd.title,
-                        subtitle: cmd.subtitle,
-                        category: .systemCommand,
-                        score: 40,
+                        title: cmd.name,
+                        subtitle: cmd.description,
+                        category: "Plugin",
                         actionPayload: cmd.id,
-                        previewDetail: "macOS System Command: \(cmd.title)\n\(cmd.subtitle)",
-                        action: { cmd.action() }
+                        scoreBoost: 500,
+                        pluginId: manifest.id
                     )
-                )
-                continue
+                }
+            } else {
+                let matching = cmdPlugin.commands.filter {
+                    $0.id.localizedCaseInsensitiveContains(filterTerm) ||
+                    $0.name.localizedCaseInsensitiveContains(filterTerm) ||
+                    $0.description.localizedCaseInsensitiveContains(filterTerm) ||
+                    $0.triggers.contains(where: { $0.localizedCaseInsensitiveContains(filterTerm) })
+                }
+                let chosen = matching.isEmpty ? (cmdPlugin.commands.isEmpty ? [] : [cmdPlugin.commands[0]]) : matching
+                items = chosen.map { cmd in
+                    PluginItem(
+                        id: cmd.id,
+                        title: cmd.name,
+                        subtitle: cmd.description,
+                        category: "Plugin",
+                        actionPayload: cmd.id,
+                        scoreBoost: 500,
+                        pluginId: manifest.id
+                    )
+                }
             }
-
-            var bestScore: Int? = nil
-            var bestIndices: [Int] = []
-
-            if let titleMatch = FuzzyMatcher.match(query: query, target: cmd.title) {
-                bestScore = titleMatch.score
-                bestIndices = titleMatch.matchedIndices
+            return mapPluginItems(items, manifest: manifest)
+        } else {
+            var items: [PluginItem] = []
+            let (_, stream) = pluginHost.query(pluginId: manifest.id, query: invocation.primaryValue)
+            for await response in stream {
+                if Task.isCancelled { return [] }
+                if case .listResult(_, let resItems) = response {
+                    items = resItems
+                }
             }
+            return mapPluginItems(items, manifest: manifest)
+        }
+    }
 
-            for kw in cmd.keywords {
-                if let kwMatch = FuzzyMatcher.match(query: query, target: kw) {
-                    let score = kwMatch.score - 10
-                    if bestScore == nil || score > bestScore! {
-                        bestScore = score
+    public func queryPluginAsync(manifest: PluginManifest, subquery: String) async -> [SearchItem] {
+        let invocation = PluginInvocation(
+            trigger: manifest.triggers.first ?? "",
+            action: nil,
+            primaryValue: subquery,
+            flags: [:],
+            rawInput: subquery
+        )
+        return await queryPluginAsync(manifest: manifest, invocation: invocation)
+    }
+
+    public func queryPluginSync(manifest: PluginManifest, invocation: PluginInvocation) -> [SearchItem] {
+        let local = pluginHost.getNativePlugin(id: manifest.id)
+        if let streaming = local as? (any TitikStreamingPlugin) {
+            nonisolated(unsafe) var items: [PluginItem] = []
+            let sema = DispatchSemaphore(value: 0)
+            Task.detached(priority: .userInitiated) {
+                if let canvas = try? await streaming.onQuery(invocation: invocation) {
+                    if case .list(let listItems) = canvas {
+                        items = listItems
+                    }
+                }
+                sema.signal()
+            }
+            _ = sema.wait(timeout: .now() + .seconds(3))
+            return mapPluginItems(items, manifest: manifest)
+        } else if let cmdPlugin = local as? (any TitikCommandPlugin) {
+            let filterTerm = invocation.action ?? invocation.primaryValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let items: [PluginItem]
+            if filterTerm.isEmpty {
+                items = cmdPlugin.commands.map { cmd in
+                    PluginItem(
+                        id: cmd.id,
+                        title: cmd.name,
+                        subtitle: cmd.description,
+                        category: "Plugin",
+                        actionPayload: cmd.id,
+                        scoreBoost: 500,
+                        pluginId: manifest.id
+                    )
+                }
+            } else {
+                let matching = cmdPlugin.commands.filter {
+                    $0.id.localizedCaseInsensitiveContains(filterTerm) ||
+                    $0.name.localizedCaseInsensitiveContains(filterTerm) ||
+                    $0.description.localizedCaseInsensitiveContains(filterTerm) ||
+                    $0.triggers.contains(where: { $0.localizedCaseInsensitiveContains(filterTerm) })
+                }
+                let chosen = matching.isEmpty ? (cmdPlugin.commands.isEmpty ? [] : [cmdPlugin.commands[0]]) : matching
+                items = chosen.map { cmd in
+                    PluginItem(
+                        id: cmd.id,
+                        title: cmd.name,
+                        subtitle: cmd.description,
+                        category: "Plugin",
+                        actionPayload: cmd.id,
+                        scoreBoost: 500,
+                        pluginId: manifest.id
+                    )
+                }
+            }
+            return mapPluginItems(items, manifest: manifest)
+        } else {
+            nonisolated(unsafe) var items: [PluginItem] = []
+            let sema = DispatchSemaphore(value: 0)
+            DispatchQueue.global(qos: .userInitiated).async {
+                Task {
+                    let (_, stream) = self.pluginHost.query(pluginId: manifest.id, query: invocation.primaryValue)
+                    for await response in stream {
+                        if case .listResult(_, let resItems) = response {
+                            items = resItems
+                        }
+                    }
+                    sema.signal()
+                }
+            }
+            _ = sema.wait(timeout: .now() + .milliseconds(1500))
+            return mapPluginItems(items, manifest: manifest)
+        }
+    }
+
+    private func queryPluginSync(manifest: PluginManifest, subquery: String) -> [SearchItem] {
+        let invocation = PluginInvocation(
+            trigger: manifest.triggers.first ?? "",
+            action: nil,
+            primaryValue: subquery,
+            flags: [:],
+            rawInput: subquery
+        )
+        return queryPluginSync(manifest: manifest, invocation: invocation)
+    }
+
+    private func mapPluginItems(_ pluginItems: [PluginItem], manifest: PluginManifest) -> [SearchItem] {
+        return pluginItems.map { pItem in
+            let searchCategory = categoryForPluginItem(pItem, manifestId: manifest.id)
+            let itemId = pItem.id.hasPrefix("\(manifest.id):") ? pItem.id : "\(manifest.id):\(pItem.id)"
+
+            var previewURL: URL? = nil
+            var previewType: PreviewType = .none
+            var icon: NSImage? = nil
+            let payload = pItem.actionPayload
+
+            if searchCategory == .application {
+                if payload.hasSuffix(".app") {
+                    icon = AppLauncher.shared.icon(forPath: payload)
+                }
+            } else if searchCategory == .file || searchCategory == .directory {
+                if !payload.isEmpty && (payload.hasPrefix("/") || payload.hasPrefix("~")) {
+                    let expanded = PathResolver.expandPath(payload)
+                    let url = URL(fileURLWithPath: expanded)
+                    var isDir: ObjCBool = false
+                    if FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir) {
+                        previewURL = url
+                        previewType = FileBrowser.shared.determinePreviewType(for: url, isDirectory: isDir.boolValue, countItems: false)
+                        icon = AppLauncher.shared.icon(forPath: expanded)
                     }
                 }
             }
 
-            if let score = bestScore {
-                results.append(
-                    SearchItem(
-                        id: cmd.id,
-                        title: cmd.title,
-                        subtitle: cmd.subtitle,
-                        category: .systemCommand,
-                        score: score + 40,
-                        actionPayload: cmd.id,
-                        matchedIndices: bestIndices,
-                        previewDetail: "macOS System Command: \(cmd.title)\n\(cmd.subtitle)",
-                        action: { cmd.action() }
-                    )
-                )
-            }
-        }
-        return results
-    }
-
-    private func searchClipboard(query: String) -> [SearchItem] {
-        let items = clipboardManager.getItems()
-        var results: [SearchItem] = []
-
-        for clip in items {
-            if query.isEmpty {
-                results.append(
-                    SearchItem(
-                        id: "clip:\(clip.id.uuidString)",
-                        title: clip.preview,
-                        subtitle: "\(clip.lineCount) line(s)",
-                        category: .clipboard,
-                        score: 30,
-                        actionPayload: clip.content,
-                        previewDetail: clip.content,
-                        action: { [weak self] in
-                            self?.clipboardManager.copyToPasteboard(clip.content)
-                            return true
-                        }
-                    )
-                )
-            } else if let match = FuzzyMatcher.match(query: query, target: clip.content) {
-                results.append(
-                    SearchItem(
-                        id: "clip:\(clip.id.uuidString)",
-                        title: clip.preview,
-                        subtitle: "\(clip.lineCount) line(s)",
-                        category: .clipboard,
-                        score: match.score + 20,
-                        actionPayload: clip.content,
-                        matchedIndices: match.matchedIndices,
-                        previewDetail: clip.content,
-                        action: { [weak self] in
-                            self?.clipboardManager.copyToPasteboard(clip.content)
-                            return true
-                        }
-                    )
-                )
-            }
-        }
-        return results
-    }
-
-    private func evaluateMath(_ ast: MathExpressionAST, rawQuery: String, scoreBoost: Int) -> SearchItem? {
-        do {
-            let result = try MathEvaluator.evaluate(ast)
-            let formatted = MathEvaluator.formatResult(result)
             return SearchItem(
-                id: "math:result",
-                title: formatted,
-                subtitle: "\(rawQuery)  (Press Enter to copy)",
-                category: .calculator,
-                score: scoreBoost + 200,
-                actionPayload: formatted,
-                previewDetail: "Expression: \(rawQuery)\nResult: \(formatted)",
+                id: itemId,
+                title: pItem.title,
+                subtitle: pItem.subtitle,
+                category: searchCategory,
+                score: pItem.scoreBoost,
+                icon: icon,
+                actionPayload: pItem.actionPayload,
+                previewDetail: "\(pItem.title)\n\(pItem.subtitle)",
+                previewType: previewType,
+                previewURL: previewURL,
                 action: { [weak self] in
-                    self?.clipboardManager.copyToPasteboard(formatted)
-                    return true
+                    if let dispatcher = SearchEngine.pluginCommandDispatcher,
+                       dispatcher(manifest.id, pItem.actionPayload) {
+                        return true
+                    }
+
+                    if let cmdPlugin = self?.pluginHost.getNativePlugin(id: manifest.id) as? (any TitikCommandPlugin) {
+                        let sema = DispatchSemaphore(value: 0)
+                        Task {
+                            let ctx = CommandExecutionContext(trigger: "search", mode: .background, rawInput: pItem.actionPayload)
+                            _ = try? await cmdPlugin.executeCommand(id: pItem.actionPayload, arguments: [:], context: ctx)
+                            sema.signal()
+                        }
+                        _ = sema.wait(timeout: .now() + .seconds(2))
+                        return true
+                    }
+
+                    if !pItem.actionPayload.isEmpty {
+                        ClipboardManager.shared.copyToPasteboard(pItem.actionPayload)
+                        return true
+                    }
+                    return false
                 }
             )
-        } catch {
-            return nil
         }
+    }
+
+    private func categoryForPlugin(id: String) -> SearchCategory {
+        let lastPart = id.components(separatedBy: ".").last ?? id
+        if let direct = SearchCategory(rawValue: lastPart) ?? SearchCategory.allCases.first(where: { $0.rawValue.caseInsensitiveCompare(lastPart) == .orderedSame }) {
+            return direct
+        }
+        let lower = lastPart.lowercased()
+        if lower == "app" { return .application }
+        if lower == "system" { return .systemCommand }
+        if lower == "math" { return .calculator }
+        return .plugin
+    }
+
+    private func scoreForPlugin(id: String) -> Int {
+        let category = categoryForPlugin(id: id)
+        return scoreForCategory(category)
+    }
+
+    private func scoreForCategory(_ category: SearchCategory) -> Int {
+        switch category {
+        case .emoji: return 100
+        case .file: return 95
+        case .application: return 90
+        case .clipboard: return 85
+        case .systemCommand: return 80
+        case .calculator: return 75
+        default: return 70
+        }
+    }
+
+    private func categoryForPluginItem(_ pItem: PluginItem, manifestId: String) -> SearchCategory {
+        if let direct = SearchCategory(rawValue: pItem.category) ?? SearchCategory.allCases.first(where: { $0.rawValue.caseInsensitiveCompare(pItem.category) == .orderedSame }) {
+            return direct
+        }
+        let lower = pItem.category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lower == "app" || lower == "application" { return .application }
+        if lower == "system command" || lower == "command" || lower == "system" { return .systemCommand }
+        if lower == "math" || lower == "calculator" { return .calculator }
+        if lower == "directory" || lower == "folder" { return .directory }
+        return categoryForPlugin(id: manifestId)
     }
 }
