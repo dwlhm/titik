@@ -137,9 +137,21 @@ struct MarkdownParserTests {
     @Test("Streaming sanitizer leaves balanced text untouched")
     func test_sanitizerLeavesBalancedTextUntouched() {
         let input = "plain text with **bold** and [link](https://example.com)"
-
         let sanitized = TitikMarkdownView.sanitizeStreamingTail(input)
 
         #expect(sanitized == input)
     }
+
+    @Test("Re-exported Markdown Document is accessible via TitikPluginKit")
+    func test_reexportedMarkdownDocument() {
+        let doc = Document(parsing: "# Hello World")
+        #expect(doc.childCount == 1)
+        guard let heading = doc.child(at: 0) as? Heading else {
+            Issue.record("Expected Heading, got \(doc.children)")
+            return
+        }
+        #expect(heading.level == 1)
+        #expect(heading.plainText == "Hello World")
+    }
 }
+

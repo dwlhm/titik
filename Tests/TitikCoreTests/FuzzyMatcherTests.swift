@@ -1,5 +1,5 @@
 import Testing
-import TitikSearch
+import TitikCore
 
 @Suite("FuzzyMatcher Tests")
 struct FuzzyMatcherTests {

@@ -3,11 +3,21 @@ import Foundation
 import TitikCore
 import TitikParser
 import TitikPlugins
+import TitikPluginKit
 import TitikSearch
 
 @Suite("SearchEngine E2E Tests")
 struct SearchEngineE2ETests {
-    let searchEngine = SearchEngine()
+    let searchEngine: SearchEngine
+
+    init() {
+        let host = PluginHost()
+        for entry in BuiltinPluginRegistry.all {
+            let plugin = entry.factory(PluginContext(pluginId: entry.id))
+            host.registerNativePlugin(plugin, manifest: entry.manifest)
+        }
+        self.searchEngine = SearchEngine(pluginHost: host)
+    }
 
     @Test("Empty query returns curated defaults with running apps")
     func testEmptyQueryReturnsCuratedDefaults() {

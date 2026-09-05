@@ -1,5 +1,6 @@
 import Testing
 import TitikParser
+import TitikPlugins
 import TitikSearch
 
 @Suite("MathEvaluator Tests")

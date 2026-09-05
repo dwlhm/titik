@@ -3,7 +3,7 @@ import Testing
 import TitikPlugins
 import TitikPluginKit
 
-private final class MockE2EPlugin: TitikStreamingPlugin, @unchecked Sendable {
+private final class MockLifecycleE2EPlugin: TitikStreamingPlugin, @unchecked Sendable {
     static let id = "titik.plugin.test"
     static let name = "test"
     static let version = "1.0.0"
@@ -41,21 +41,20 @@ struct PluginLifecycleE2ETests {
             version: "1.0.0",
             sdkVersion: 2,
             description: "Test plugin",
-            entrypoint: "MockE2EPlugin",
+            entrypoint: "MockLifecycleE2EPlugin",
             triggers: ["!test", "!t"]
         )
         let context = PluginContext(pluginId: manifest.id)
-        let plugin = MockE2EPlugin(context: context)
+        let plugin = MockLifecycleE2EPlugin(context: context)
         host.registerNativePlugin(plugin, manifest: manifest)
 
         let loaded = host.loadedManifests()
         #expect(loaded.count == 1)
         #expect(loaded.first?.id == "titik.plugin.test")
 
-        let activeShort = host.findActivePlugin(forQuery: "!t query")
+        let activeShort = host.findActivePlugin(command: "t")
         #expect(activeShort != nil)
-        #expect(activeShort?.manifest.id == "titik.plugin.test")
-        #expect(activeShort?.subquery == "query")
+        #expect(activeShort?.id == "titik.plugin.test")
 
         host.unloadPlugin(id: "titik.plugin.test")
         #expect(host.loadedManifests().isEmpty)

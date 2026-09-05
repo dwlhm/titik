@@ -91,7 +91,7 @@ struct BangRouterTests {
         let host = PluginHost()
         defer { host.shutdownAll() }
 
-        let mathPluginPath = "plugins/math_plugin/math.dylib"
+        let mathPluginPath = "plugins/math_plugin.bundle"
         if FileManager.default.fileExists(atPath: mathPluginPath) {
             _ = host.loadPlugin(at: mathPluginPath)
             let engine = SearchEngine(pluginHost: host)

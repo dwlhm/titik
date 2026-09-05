@@ -49,7 +49,7 @@ struct AppLifecycleE2ETests {
 
     @Test("Keyboard navigation lifecycle with active preview pane")
     @MainActor
-    func testKeyboardNavigationLifecycleWithActivePreviewPane() throws {
+    func testKeyboardNavigationLifecycleWithActivePreviewPane() async throws {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("titik_e2e_nav_\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDir) }
@@ -64,6 +64,10 @@ struct AppLifecycleE2ETests {
 
         // Setting a path query (directory browsing)
         orchestrator.query = tempDir.path + "/"
+        for _ in 0..<40 {
+            if orchestrator.results.count == 3 { break }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
 
         #expect(orchestrator.results.count == 3)
         #expect(orchestrator.selectedIndex == 0)

@@ -5,7 +5,7 @@ import TitikCore
 import TitikUI
 import TitikPlatform
 
-@Suite("AutoPaster Tests")
+@Suite("AutoPaster Tests", .serialized)
 @MainActor
 struct AutoPasterTests {
 

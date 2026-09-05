@@ -92,8 +92,40 @@ struct CommandParserTests {
         #expect(parser.parse("!") == .bangSuggestion(prefix: ""))
         #expect(parser.parse("!e") == .bangSuggestion(prefix: "e"))
         #expect(parser.parse("!emoji") == .bangSuggestion(prefix: "emoji"))
-        #expect(parser.parse("!e ") == .command(name: "e", args: [], flags: [:]))
-        #expect(parser.parse("!emoji ") == .command(name: "emoji", args: [], flags: [:]))
-        #expect(parser.parse("!emoji smile") == .command(name: "emoji", args: ["smile"], flags: [:]))
+        #expect(parser.parse("!e ") == .pluginInvocation(trigger: "e", action: nil, primaryValue: "", flags: [:], booleanFlags: [], rawTail: ""))
+        #expect(parser.parse("!emoji ") == .pluginInvocation(trigger: "emoji", action: nil, primaryValue: "", flags: [:], booleanFlags: [], rawTail: ""))
+        #expect(parser.parse("!emoji smile") == .pluginInvocation(trigger: "emoji", action: nil, primaryValue: "smile", flags: [:], booleanFlags: [], rawTail: "smile"))
+    }
+
+    @Test("Parse note bang command and suggestions (ADR 5)")
+    func testNoteBangCommandAndSuggestions() {
+        #expect(parser.parse("!note") == .bangSuggestion(prefix: "note"))
+        #expect(parser.parse("!notes") == .bangSuggestion(prefix: "notes"))
+        #expect(parser.parse("!note ") == .pluginInvocation(trigger: "note", action: nil, primaryValue: "", flags: [:], booleanFlags: [], rawTail: ""))
+        #expect(parser.parse("!note my title") == .pluginInvocation(trigger: "note", action: nil, primaryValue: "my title", flags: [:], booleanFlags: [], rawTail: "my title"))
+    }
+
+    @Test("Parse delimiter-bounded segment parsing with multi-word values and flags")
+    func testDelimiterBoundedSegmentParsing() {
+        let ast = parser.parse("!zen open swift docs --profile work --private", knownSubcommands: ["open", "new-tab"])
+        if case .pluginInvocation(let trigger, let action, let primaryValue, let flags, let booleanFlags, _) = ast {
+            #expect(trigger == "zen")
+            #expect(action == "open")
+            #expect(primaryValue == "swift docs")
+            #expect(flags["profile"] == "work")
+            #expect(booleanFlags.contains("private"))
+        } else {
+            #expect(Bool(false), "Expected .pluginInvocation, got \(ast)")
+        }
+
+        let inlineAst = parser.parse("!calc 42 * 1024 --format=hex")
+        if case .pluginInvocation(let trigger, let action, let primaryValue, let flags, _, _) = inlineAst {
+            #expect(trigger == "calc")
+            #expect(action == nil)
+            #expect(primaryValue == "42 * 1024")
+            #expect(flags["format"] == "hex")
+        } else {
+            #expect(Bool(false), "Expected .pluginInvocation, got \(inlineAst)")
+        }
     }
 }

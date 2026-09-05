@@ -29,7 +29,7 @@ struct PluginManagerTests {
         let loader = ConfigLoader(config: Config())
         let manager = PluginManager(host: host, configLoader: loader)
         manager.reindex() // plugins dir doesn't exist in test env
-        #expect(host.allNativePlugins().count == 2)
+        #expect(host.allNativePlugins().count == BuiltinPluginRegistry.all.count)
     }
 
     @Test("List unregistered bundle shows nil state")

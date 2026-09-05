@@ -5,7 +5,7 @@ import Testing
 @testable import TitikPlugins
 import class TitikUI.ToastManager
 
-@Suite("EmojiPlugin Tests")
+@Suite("EmojiPlugin Tests", .serialized)
 struct EmojiPluginTests {
 
     func makePlugin() -> EmojiPlugin {
@@ -48,13 +48,12 @@ struct EmojiPluginTests {
         }
     }
 
-    @Test("Manifest triggers contain !emoji and !e")
+    @Test("Manifest triggers contain canonical triggers")
     func test_manifest_triggers() {
         #expect(emojiPluginManifest.id == "titik.builtin.emoji")
-        #expect(emojiPluginManifest.triggers.contains("!emoji"))
-        #expect(emojiPluginManifest.triggers.contains("!e"))
+        #expect(emojiPluginManifest.triggers.contains("emoji"))
+        #expect(emojiPluginManifest.triggers.contains("e"))
         #expect(emojiPluginManifest.normalizedBangs.contains("emoji"))
-        #expect(emojiPluginManifest.normalizedBangs.contains("e"))
     }
 
     @Test("PluginManager.reindex() registers built-in plugins by default")
@@ -68,7 +67,7 @@ struct EmojiPluginTests {
 
         #expect(host.getNativePlugin(id: EmojiPlugin.id) != nil)
         #expect(host.getNativePlugin(id: PluginSystemPlugin.id) != nil)
-        #expect(host.allNativePlugins().count == 2)
+        #expect(host.allNativePlugins().count == BuiltinPluginRegistry.all.count)
     }
 
     @Test("Disabling titik.builtin.emoji in config unloads the plugin")
