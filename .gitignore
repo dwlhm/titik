@@ -26,6 +26,7 @@ Thumbs.db
 *.xcodeproj/
 *.xcworkspace/
 xcuserdata/
+.agents/
 
 # Local state & logs
 *.log
