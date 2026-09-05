@@ -70,7 +70,7 @@ struct LauncherPluginTests {
         let result = try await plugin.executeCommand(
             id: "open-project",
             arguments: [
-                "path": "~/project/titik",
+                "path": "~/test-workspace",
                 "ide": "Antigravity"
             ],
             context: context
@@ -78,7 +78,7 @@ struct LauncherPluginTests {
 
         #expect(result.isSuccess == true)
         #expect(result.outputPayload?["ide"] == "Antigravity")
-        #expect(result.outputPayload?["path"]?.contains("project/titik") == true)
+        #expect(result.outputPayload?["path"]?.contains("test-workspace") == true)
         #expect(result.outputPayload?["path"]?.hasPrefix("~") == false)
     }
 

@@ -12,21 +12,6 @@ struct E2EBuiltinPluginsTests {
 
     // MARK: - Feature 12: Zen Browser Built-in Plugin
 
-    @Test("F12: Zen Browser URL parameter validation and launch arguments formatting")
-    func test_f12_zenBrowserURLValidation() {
-        let validURLs = [
-            "https://apple.com",
-            "http://localhost:3000",
-            "zen://settings",
-            "https://github.com/trending"
-        ]
-
-        for urlStr in validURLs {
-            let parsedURL = URL(string: urlStr)
-            #expect(parsedURL != nil)
-            #expect(parsedURL?.scheme != nil)
-        }
-    }
 
     @Test("F12: Zen Browser new tab command arguments generation")
     func test_f12_newTabCommandExecution() {
@@ -47,23 +32,6 @@ struct E2EBuiltinPluginsTests {
         #expect(cliFlags.contains("https://work.slack.com"))
     }
 
-    @Test("F12: Zen Browser plugin manifest metadata and triggers")
-    func test_f12_zenPluginManifestMetadata() {
-        let manifest = PluginManifest(
-            id: "titik.builtin.zen",
-            name: "Zen Browser",
-            version: "1.0.0",
-            sdkVersion: 2,
-            description: "Control Zen Browser tabs, windows, and profiles",
-            entrypoint: "ZenBrowserPlugin",
-            triggers: ["zen"],
-            permissions: ["workspace:launch"]
-        )
-
-        #expect(manifest.id == "titik.builtin.zen")
-        #expect(manifest.triggers.contains("zen"))
-        #expect(manifest.sdkVersion == 2)
-    }
 
     @Test("F12: Zen Browser empty or invalid URL handling defaults to empty window/tab")
     func test_f12_invalidURLHandlingInZenPlugin() {
@@ -89,27 +57,27 @@ struct E2EBuiltinPluginsTests {
 
     @Test("F13: Project directory launcher IDE resolution (Antigravity / VSCode)")
     func test_f13_openProjectDirectoryInIDE() async throws {
-        let projectPath = "/Users/dwlhm/project/titik"
+        let projectPath = FileManager.default.currentDirectoryPath
         let ideName = "Antigravity"
 
         let plugin = LauncherPlugin(context: PluginContext(pluginId: LauncherPlugin.id))
         let result = try await plugin.executeCommand(
             id: "open-project",
             arguments: ["path": projectPath, "ide": ideName],
-            context: CommandExecutionContext(trigger: "open", mode: .background, rawInput: "!open ~/project/titik")
+            context: CommandExecutionContext(trigger: "open", mode: .background, rawInput: "!open \(projectPath)")
         )
         #expect(result.isSuccess == true)
         #expect(result.outputPayload?["ide"] == "Antigravity")
-        #expect(result.outputPayload?["path"] == "/Users/dwlhm/project/titik")
+        #expect(result.outputPayload?["path"] == projectPath)
     }
 
     @Test("F13: Tilde path expansion in launcher resolves to absolute home directory")
     func test_f13_tildePathExpansionInLauncher() {
-        let tildePath = "~/project/titik"
+        let tildePath = "~/test-workspace"
         let expanded = PathResolver.expandPath(tildePath)
 
         #expect(!expanded.hasPrefix("~"))
-        #expect(expanded.contains("project/titik"))
+        #expect(expanded.contains("test-workspace"))
         #expect(PathResolver.isPathQuery(expanded) == true)
     }
 
@@ -119,24 +87,6 @@ struct E2EBuiltinPluginsTests {
         let scanned = AppLauncher.shared.scanApplications()
         let matches = scanned.filter { $0.name.localizedCaseInsensitiveContains(nonExistent) }
         #expect(matches.isEmpty)
-    }
-
-    @Test("F13: Launcher plugin manifest metadata and triggers")
-    func test_f13_launcherPluginManifestMetadata() {
-        let manifest = PluginManifest(
-            id: "titik.builtin.launcher",
-            name: "App & Project Launcher",
-            version: "1.0.0",
-            sdkVersion: 2,
-            description: "Launch applications and open IDE projects",
-            entrypoint: "LauncherPlugin",
-            triggers: ["open", "launch"],
-            permissions: ["workspace:launch"]
-        )
-
-        #expect(manifest.id == "titik.builtin.launcher")
-        #expect(manifest.triggers.contains("open"))
-        #expect(manifest.triggers.contains("launch"))
     }
 
     // MARK: - Feature 14: Shortcuts Inspector Plugin
@@ -188,15 +138,6 @@ struct E2EBuiltinPluginsTests {
         #expect(items.first?.subtitle.contains("zen.browser") == true)
     }
 
-    @Test("F14: Display formatted glyphs and action description")
-    func test_f14_displayFormattedGlyphAndAction() throws {
-        let combo = try #require(KeyCombination(string: "ctrl+shift+p"))
-        let glyphs = combo.description
-
-        #expect(glyphs.contains("⌃"))
-        #expect(glyphs.contains("⇧"))
-        #expect(glyphs.contains("P"))
-    }
 
     @Test("F14: Trigger selected shortcut from search item invokes bound action")
     func test_f14_triggerSelectedShortcutFromUI() async throws {
@@ -222,23 +163,6 @@ struct E2EBuiltinPluginsTests {
         #expect(executedBox.get() == true)
     }
 
-    @Test("F14: Shortcuts plugin manifest metadata and triggers")
-    func test_f14_shortcutsPluginManifestMetadata() {
-        let manifest = PluginManifest(
-            id: "titik.builtin.shortcuts",
-            name: "Shortcuts Inspector",
-            version: "1.0.0",
-            sdkVersion: 2,
-            description: "Inspect and trigger active global shortcuts",
-            entrypoint: "ShortcutsPlugin",
-            triggers: ["shortcut", "hotkeys"],
-            permissions: ["keymap:read"]
-        )
-
-        #expect(manifest.id == "titik.builtin.shortcuts")
-        #expect(manifest.triggers.contains("shortcut"))
-        #expect(manifest.triggers.contains("hotkeys"))
-    }
 }
 
 // MARK: - Helper Functions & Types

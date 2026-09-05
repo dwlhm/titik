@@ -69,7 +69,7 @@ struct E2EConfigLiveReloadTests {
             "target": "titik.builtin.launcher",
             "arguments": {
                 "ide": "Antigravity",
-                "path": "/Users/dwlhm/project/titik",
+                "path": "/Users/developer/project",
                 "createWindow": "true"
             }
         }
@@ -79,7 +79,7 @@ struct E2EConfigLiveReloadTests {
         #expect(action.type == .pluginCommand)
         #expect(action.target == "titik.builtin.launcher")
         #expect(action.arguments?["ide"] == "Antigravity")
-        #expect(action.arguments?["path"] == "/Users/dwlhm/project/titik")
+        #expect(action.arguments?["path"] == "/Users/developer/project")
         #expect(action.arguments?["createWindow"] == "true")
     }
 

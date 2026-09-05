@@ -86,7 +86,7 @@ if [ "${FAST}" = true ]; then
     echo "--> [Stage 3/4] Running modular fast unit tests (--fast mode)..."
     make test-unit
 else
-    echo "--> [Stage 3/4] Running comprehensive full test suite (58 suites)..."
+    echo "--> [Stage 3/4] Running comprehensive full test suite..."
     make test
 fi
 

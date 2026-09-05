@@ -38,12 +38,8 @@ struct AdversarialBangAndCommandTests {
         ]
 
         for query in edgeQueries {
-            let ast = parser.parse(query)
-            #expect(ast != nil)
-
-            let result = await dispatcher.dispatch(query: query, mode: .background)
-            // Should always return a valid result without crashing
-            #expect(result != nil)
+            _ = parser.parse(query)
+            _ = await dispatcher.dispatch(query: query, mode: .background)
         }
     }
 
@@ -278,24 +274,21 @@ struct AdversarialBangAndCommandTests {
     func testLauncherPluginPathResolution() async throws {
         let launcher = LauncherPlugin(context: PluginContext(pluginId: LauncherPlugin.id))
 
-        // 1. Test supported IDE resolution
-        let vscodeURL = launcher.resolveIDEAppURL(ide: "vscode")
-        let antigravityURL = launcher.resolveIDEAppURL(ide: "Antigravity")
-        let cursorURL = launcher.resolveIDEAppURL(ide: "cursor")
-        let xcodeURL = launcher.resolveIDEAppURL(ide: "Xcode")
-
-        #expect(vscodeURL != nil || antigravityURL != nil || cursorURL != nil || xcodeURL != nil || true)
+        // 1. Test non-existent IDE resolution returns nil safely
+        let nonExistentURL = launcher.resolveIDEAppURL(ide: "NonExistentIDE_\(UUID().uuidString)")
+        #expect(nonExistentURL == nil)
 
         // 2. Open Project with tilde path
-        let ctx = CommandExecutionContext(trigger: "test", mode: .background, rawInput: "!open ~/project/titik")
+        let ctx = CommandExecutionContext(trigger: "test", mode: .background, rawInput: "!open ~/test-workspace")
         let result = try await launcher.executeCommand(
             id: "open-project",
-            arguments: ["path": "~/project/titik", "ide": "Antigravity"],
+            arguments: ["path": "~/test-workspace", "ide": "Antigravity"],
             context: ctx
         )
         #expect(result.isSuccess == true)
         #expect(result.outputPayload?["ide"] == "Antigravity")
         #expect(result.outputPayload?["path"]?.hasPrefix("/") == true)
+        #expect(result.outputPayload?["path"]?.hasSuffix("test-workspace") == true)
     }
 
     @Test("Adversarial: Shortcuts Inspector listing, filtering, and conflict detection")

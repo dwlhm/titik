@@ -270,12 +270,12 @@ struct E2ECommandDispatchTests {
     @Test("F11: Bang query with flags and subcommands parsed cleanly")
     func test_f11_bangQueryWithSubcommand() {
         let parser = CommandParser()
-        let ast = parser.parse("!open -ide=Antigravity ~/project/titik")
+        let ast = parser.parse("!open -ide=Antigravity ~/workspace/demo")
 
         if case .pluginInvocation(let trigger, _, let primaryValue, let flags, _, _) = ast {
             #expect(trigger == "open")
             #expect(flags["ide"] == "Antigravity")
-            #expect(primaryValue == "~/project/titik")
+            #expect(primaryValue == "~/workspace/demo")
         } else {
             #expect(Bool(false), "Expected .pluginInvocation AST with flags")
         }

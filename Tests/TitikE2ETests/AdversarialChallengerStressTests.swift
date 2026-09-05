@@ -39,7 +39,6 @@ struct AdversarialChallengerStressTests {
         }
 
         let bindings = registry.allBindings()
-        #expect(bindings.count >= 0)
 
         // Verify invariant: allBindings count matches uniqueness of combinations
         let comboSet = Set(bindings.map(\.combination))
@@ -77,8 +76,6 @@ struct AdversarialChallengerStressTests {
             }
         }
 
-        let active = registry.allBindings()
-        #expect(active.count >= 0)
         registry.clear()
         #expect(registry.allBindings().isEmpty)
     }
