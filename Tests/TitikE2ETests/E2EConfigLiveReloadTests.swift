@@ -301,7 +301,7 @@ struct E2EConfigLiveReloadTests {
 
     @Test("F08: Debounce suppresses rapid successive writes into single reload")
     func test_f08_configWatcherDebounceSuppression() async throws {
-        let watcher = ConfigWatcher(debounceInterval: 0.25)
+        let watcher = ConfigWatcher(debounceInterval: 0.15)
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("watcher_debounce_\(UUID().uuidString).json")
         try "{}".write(to: tempURL, atomically: true, encoding: .utf8)
         defer {
@@ -315,20 +315,19 @@ struct E2EConfigLiveReloadTests {
             counter.increment()
         }
 
-        // Perform 5 rapid writes in under 20ms
+        // Perform 5 rapid synchronous writes in immediate succession without yielding
         for i in 1...5 {
             let json = """
             { "window": { "width": \(700 + i) } }
             """
             try? json.write(to: tempURL, atomically: false, encoding: .utf8)
-            try? await Task.sleep(nanoseconds: 2_000_000) // 2ms
         }
 
         // Wait for debounce period to settle
         _ = await waitForCondition(timeoutSeconds: 2.0) {
             counter.count >= 1
         }
-        #expect(counter.count >= 1 && counter.count < 5)
+        #expect(counter.count >= 1 && counter.count <= 2)
     }
 
     private func waitForCondition(
