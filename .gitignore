@@ -30,3 +30,7 @@ xcuserdata/
 
 # Local state & logs
 *.log
+
+# Release artifacts
+Titik-*.zip
+checksums.txt
